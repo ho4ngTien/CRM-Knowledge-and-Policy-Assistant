@@ -1,13 +1,13 @@
 # SKILL — Jira + Git Workflow
 
 > Hướng dẫn tích hợp Jira và Git cho dự án CKPA.
-> Đọc cùng [jira-playbook.md](../docs/jira-playbook.md) và [git-playbook.md](../docs/git-playbook.md).
+> Đọc cùng [jira-playbook.md](./jira-playbook.md) và [git-playbook.md](./git-playbook.md).
 
 ## Tạo branch từ Jira issue
 
 ```bash
-# Lấy issue key từ Jira (vd: CKPA-123)
-git switch -c feature/CKPA-123-short-description
+# Lấy issue key & Summary tiếng Anh từ Jira (vd: CKPA-19)
+git switch -c feat/CKPA-19-build-2-csv-validators-and-quarantine
 ```
 
 ## Commit convention
@@ -26,7 +26,7 @@ test(answer): add citation validation edge cases [CKPA-67]
 ## Quy trình PR
 
 1. Tạo branch từ `main` hoặc `develop` (theo quy ước nhóm).
-2. Commit thay đổi, chạy `make lint test` trước push.
+2. Commit thay đổi, chạy `.\dev.ps1 lint` & `.\dev.ps1 test` (hoặc `make lint test`) trước push.
 3. Mở PR với title `[CKPA-123] <mô tả>`, dùng template trong git-playbook.
 4. Reviewer gắn `[blocking]` hoặc `[suggestion]`.
 5. Merge sau khi CI pass và không còn comment blocking.

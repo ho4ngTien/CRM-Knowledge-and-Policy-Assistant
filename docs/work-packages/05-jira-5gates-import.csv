@@ -1,0 +1,516 @@
+"Issue ID","Issue Type","Parent","Summary","Description","Priority","Labels","Components","Sprint","Start date","Due date","Original Estimate","Assignee","Outward issue link (Relates)","Outward issue link (Blocks)","Blocked By (Issue IDs)","Blocks (Issue IDs)"
+"1","Epic","","Gate G0 - Ready to Build Discovery","Cổng G0 (Ready to Build - Tuần 1–2): Khảo sát hiện trạng, xác nhận 3 nhóm chính sách, lập baseline công sức, duyệt 30 đoạn + 10 trường đầu tiên, chốt hợp đồng 2 CSV/API/SRS, so sánh 3 phương án và ra quyết định phạm vi cơ sở (O1 quyết định riêng). Tham chiếu SRS: Mục 2, 3, 5.1, 8.3 (DEL 01).","Highest","G0 WP01 DEL01","governance-docs","Gate-G0-Discovery","2026-11-06","2026-11-19","","","","14","","14"
+"2","Story","1","G0-S1 Confirm policy families baseline and scope","Story G0-S1: Xác nhận nhu cầu lặp lại, 3 nhóm chính sách đề xuất, chủ sở hữu chịu trách nhiệm, mẫu dữ liệu G0 (30 passages + 10 critical rows), so sánh 3 phương án có giá và quyết định phạm vi cơ sở (O1 tách riêng). Tham chiếu SRS: SRS-FR-01.","Highest","G0 WP01 DEL01","governance-docs","Gate-G0-Discovery","2026-11-06","2026-11-19","","","","3","","3"
+"3","Story","1","G0-S2 Freeze SRS contracts architecture and eval plan","Story G0-S2: Khóa cứng hợp đồng 2 CSV UTF-8, ERD, API /api/v1/*, RBAC, hạ tầng Docker/CI, khung kiểm thử độc lập (60/40/100 + 80 challenges) và đánh giá ban đầu nhà cung cấp/pháp lý VN. Tham chiếu SRS: Mục 4, 6, 7, 8.","Highest","G0 DEL01 SEC03 SEC04 SEC06","architecture-infra","Gate-G0-Discovery","2026-11-06","2026-11-19","","","","15","2","15"
+"4","Task","1","Define G0 scope and policy families","Gate: G0 | SRS: Mục 2.1–2.3, SRS-FR-01.1 | RFP: WP01, VN04
+Phụ trách: A1 (PM/BA Lead) phối hợp toàn đội A–D
+Chi tiết công việc:
+- Xác nhận 3 nhóm chính sách khởi đầu (báo giá & phê duyệt thương mại; xử lý thông tin khách hàng; định tuyến dịch vụ/bảo hành).
+- Chốt ranh giới Base Scope: không nhập hồ sơ khách hàng, không connector trực tiếp/OCR/Zalo/writeback/auto-approval; tách tùy chọn O1 để quyết định riêng.
+- Đánh dấu nhóm thiếu Policy Owner để loại khỏi phạm vi nếu chưa sẵn sàng.
+Phụ thuộc: Không (Task khởi động #1).
+Branch gợi ý: docs/<ISSUE-KEY>-define-g0-scope-and-policy-families
+Acceptance Criteria:
+- [ ] Có biên bản xác nhận 3 nhóm chính sách kèm Policy Owner & người thay thế cho từng nhóm.
+- [ ] Ghi rõ danh sách In-Scope (M) vs Optional O1 (OFF) vs Out-of-Scope (O) khớp SRS Mục 2.","Highest","G0 WP01 VN04 SRS-FR-01 Squad-A Role-A1","governance-docs","Gate-G0-Discovery","2026-11-06","2026-11-10","8h","","2","5","","5, 6, 7, 9, 10"
+"5","Task","1","Inventory sources and 4 week baseline","Gate: G0 | SRS: SRS-FR-01.1, SRS-FR-01.2 | RFP: WP01, DEL01
+Phụ trách: A1 (PM/BA Lead)
+Chi tiết công việc:
+- Kiểm kê quy trình, tài liệu nguồn được phép, phiên bản và khoảng trống hiện hữu của SongNhat.
+- Thu thập danh mục câu hỏi thực tế phản ánh tối thiểu 4 tuần lịch sử đại diện (hoặc lập kế hoạch kéo dài thời gian quan sát tương đương — 2 tuần discovery không tự tạo 4 tuần lịch sử).
+- Đo đường cơ sở (baseline) công sức nhân viên gồm chuẩn bị, tra cứu, kiểm tra, làm lại và dự phòng; ghi mẫu số, trung vị và độ bất định.
+Phụ thuộc: Task #4.
+Branch gợi ý: docs/<ISSUE-KEY>-inventory-sources-and-4-week-baseline
+Acceptance Criteria:
+- [ ] Có sổ đăng ký nguồn, Question Inventory và báo cáo baseline effort nêu rõ mẫu số, độ phủ và độ bất định.
+- [ ] Không tuyên bố ROI là kết quả đã chứng minh.","High","G0 WP01 DEL01 SRS-FR-01 Squad-A Role-A1","governance-docs","Gate-G0-Discovery","2026-11-09","2026-11-14","16h","","2","8","4","8"
+"6","Task","1","Approve G0 30 passages and 10 fields","Gate: G0 | SRS: SRS-FR-01.4 | RFP: WP01, DAT01, DAT08, VN03, VN04
+Phụ trách: A2 (Knowledge Steward) soạn; D1 rà soát độc lập
+Chi tiết công việc:
+- Trích xuất, làm sạch và chuẩn hóa 30 đoạn nội dung đại diện đầu tiên và 10 dòng critical fields đầu tiên từ nguồn đã duyệt (lưu trong data/sample/).
+- Kiểm tra đầy đủ bảng, sơ đồ, chú thích thiết yếu (DAT 08) và lập kế hoạch có ngân sách cho phần dữ liệu còn lại trước G1.
+- Cấm tự bịa quy tắc để đạt giới hạn số lượng.
+Phụ thuộc: Task #4, Task #9.
+Branch gợi ý: chore/<ISSUE-KEY>-approve-g0-30-passages-and-10-fields
+Acceptance Criteria:
+- [ ] data/sample/ có đủ 30 passages + 10 critical field rows chuẩn UTF-8 truy vết được về bản gốc.
+- [ ] Policy Owner ký duyệt 30 đoạn + 10 dòng và kế hoạch hoàn tất corpus trước G1.","Highest","G0 WP01 DAT01 DAT08 VN03 VN04 SRS-FR-01 Squad-A Role-A2","data-curation","Gate-G0-Discovery","2026-11-10","2026-11-17","16h","","2","8","4, 9","8, 22"
+"7","Task","1","Build authority and governing date matrix","Gate: G0 | SRS: SRS-FR-04.1, SRS-FR-04.3 | RFP: DAT03, DAT04, DAT05, DEL01
+Phụ trách: A2 (Knowledge Steward), B2 (Policy Eng)
+Chi tiết công việc:
+- Thiết lập ma trận thẩm quyền cho 5 lớp nguồn tách biệt: policy, SOP, manufacturer_terms, customer_contract, staff_note.
+- Chốt quy tắc ngày áp dụng (governing_date) theo giờ Việt Nam (Asia/Ho_Chi_Minh) cho câu hỏi chung vs giao dịch có ngày cụ thể và nguyên tắc sửa hồi tố.
+- Xác nhận quy tắc xử lý xung đột: không tự suy diễn ưu tiên hợp đồng vs chính sách và không mặc định bản mới nhất thắng.
+Phụ thuộc: Task #4.
+Branch gợi ý: docs/<ISSUE-KEY>-build-authority-and-governing-date-matrix
+Acceptance Criteria:
+- [ ] Có Authority Matrix & Date Rules Matrix được Policy Owner phê duyệt.
+- [ ] Ghi rõ điều kiện bắt buộc phải HOLD khi xung đột hoặc thiếu điều kiện tiên quyết.","Highest","G0 DAT03 DAT04 DAT05 DEL01 SRS-FR-04 Squad-A Squad-B Role-A2 Role-B2","backend-policy","Gate-G0-Discovery","2026-11-09","2026-11-16","12h","","2","8","4","8"
+"8","Task","1","Compare 3 options and record G0 decision","Gate: G0 | SRS: SRS-FR-01.3, SRS-FR-01.4 | RFP: WP01, DAT07, VN06, DEL01, DEL05
+Phụ trách: D2 (Commercial Analyst), A1 (PM/BA Lead)
+Chi tiết công việc:
+- Lập bảng so sánh có chi phí 3 phương án theo cùng tiêu chí RFP: (1) Thư viện hiện tại có thể tìm kiếm, (2) Sản phẩm cấu hình sẵn [R06–R08], (3) Phát triển tùy chỉnh có giới hạn.
+- Xác nhận giả định bid (20 users, 5 concurrent, 30 docs/300 passages/50 rows, 1000 pkg/tháng, 2000 calls/tháng) và quyết định riêng cho O1 (DAT 07).
+- Tổ chức họp chốt cổng G0: duyệt phạm vi cơ sở, thu hẹp hoặc dừng.
+Phụ thuộc: Task #5, Task #6, Task #7, Task #12.
+Branch gợi ý: docs/<ISSUE-KEY>-compare-3-options-and-record-g0-decision
+Acceptance Criteria:
+- [ ] Có báo cáo so sánh 3 phương án đầy đủ chi phí, tái sử dụng và phụ thuộc.
+- [ ] Biên bản G0 ghi rõ quyết định Base Scope (và quyết định tách riêng cho O1).","Highest","G0 WP01 DAT07 VN06 DEL01 DEL05 SRS-FR-01 Squad-D Squad-A Role-D2 Role-A1","governance-docs","Gate-G0-Discovery","2026-11-14","2026-11-19","12h","","2","","5, 6, 7, 12",""
+"9","Task","1","Freeze 2 CSV contracts and DB ERD","Gate: G0 | SRS: Mục 7.3, SRS-FR-03.1 | RFP: DAT01, DAT02, DAT06, VN03, DEL01
+Phụ trách: B1 (Data Eng), A2 (Steward), B2 (Policy Eng)
+Chi tiết công việc:
+- Rà soát & khóa cứng schema 2 tệp CSV UTF-8 (passages_template.csv 21 cột và critical_fields_template.csv 23 cột) khớp docs/architecture/erd-and-csv-contract.md.
+- Chốt thiết kế DB ERD PostgreSQL 16 + pgvector cho toàn bộ bảng lõi (identity, knowledge, policy, ingestion, referral, feedback, audit, evaluation).
+- Đảm bảo không đưa schema khách hàng CRM vào phạm vi cơ sở (O1 chỉ là spec dự phòng đang tắt).
+Phụ thuộc: Task #4.
+Branch gợi ý: docs/<ISSUE-KEY>-freeze-2-csv-contracts-and-db-erd
+Acceptance Criteria:
+- [ ] data/templates/passages_template.csv và critical_fields_template.csv đủ 21 và 23 cột chuẩn UTF-8.
+- [ ] docs/architecture/erd-and-csv-contract.md được Squad A & B thống nhất khóa cứng.","Highest","G0 DAT01 DAT02 DAT06 VN03 DEL01 SRS-FR-03 Squad-B Role-B1 Role-B2 Role-A2","backend-ingestion","Gate-G0-Discovery","2026-11-06","2026-11-11","12h","","3","6","4","6, 13, 17"
+"10","Task","1","Freeze API contracts and RBAC matrix","Gate: G0 | SRS: Mục 4.3, Mục 7.2, SRS-FR-02, SRS-FR-06.1 | RFP: ANS03, SEC01, DEL01
+Phụ trách: C1 (LLM Eng), B3 (Retrieval Eng), C2 (FE Eng), C3 (SecOps Eng)
+Chi tiết công việc:
+- Khóa cứng danh sách endpoint /api/v1/* cho 12 module backend và cấu trúc JSON 7 phần của AnswerPackage.
+- Chốt ma trận RBAC tối thiểu cho các vai trò RFP (reader, policy_owner, publisher, steward, administrator, independent_evaluator, privacy_security_owner, legal_owner).
+- Thống nhất cấu hình môi trường LLM trong .env.example & config.py (6000 in / 900 out / 2 calls / 2000 calls per month, O1=false, streaming=false).
+Phụ thuộc: Task #4.
+Branch gợi ý: docs/<ISSUE-KEY>-freeze-api-contracts-and-rbac-matrix
+Acceptance Criteria:
+- [ ] 12 module schemas.py phản ánh đúng hợp đồng AnswerPackage và RBAC roles.
+- [ ] Bảng API contract & RBAC được Squad B & C ký chốt trước khi code Phase G1.","Highest","G0 ANS03 SEC01 DEL01 SRS-FR-02 SRS-FR-06 Squad-C Squad-B Role-C1 Role-C3 Role-B3","architecture-infra","Gate-G0-Discovery","2026-11-06","2026-11-12","12h","","3","11","4","11, 12, 23"
+"11","Task","1","Setup Docker stack and CI pipeline","Gate: G0 | SRS: Mục 4.1, SRS-NFR-07 | RFP: SEC06
+Phụ trách: C3 (Identity, Security & DevOps Eng)
+Chi tiết công việc:
+- Hoàn thiện docker-compose.yml (PostgreSQL 16 + pgvector + unaccent, Redis 7, FastAPI, Celery Asia/Ho_Chi_Minh, Next.js 14, Nginx).
+- Thiết lập GitHub Actions CI (.github/workflows/ci.yml) chạy ruff lint và pytest backend tự động cho mỗi PR.
+- Xác nhận tách biệt môi trường test và production, không chứa secret thật trong repo.
+Phụ thuộc: Task #10.
+Branch gợi ý: chore/<ISSUE-KEY>-setup-docker-stack-and-ci-pipeline
+Acceptance Criteria:
+- [ ] docker compose up khởi động sạch và GET /health trả 200 OK.
+- [ ] Workflow CI pass ruff check và pytest trên nhánh develop.","High","G0 SEC06 SRS-NFR-07 Squad-C Role-C3","security-infra","Gate-G0-Discovery","2026-11-11","2026-11-16","12h","","3","17","10","17"
+"12","Task","1","Assess provider routing and legal baseline","Gate: G0 | SRS: SRS-NFR-09, SRS-NFR-10 | RFP: SEC03, SEC04, VN05
+Phụ trách: D2 (Ops/Commercial), C3 (SecOps), A1 (PM/BA)
+Chi tiết công việc:
+- Kiểm kê địa điểm xử lý, lưu trữ, hỗ trợ đối với prompt, index, log, backup và danh sách subprocessor của nhà cung cấp dự kiến; xác nhận cấm huấn luyện/tái sử dụng trái phép.
+- Lập khung checklist rà soát pháp lý triển khai theo Phụ lục F RFP (Luật PDPL 91/2025/QH15, NĐ 356/2025, Luật AI 134/2025/QH15, NĐ 142/2026, Luật ANM 116/2025/QH15, QĐ 33/2026/QĐ-TTg).
+- Ghi nhận rõ hosting VN hay mã hóa không tự chứng minh tuân thủ; chuyển Legal Owner xác nhận trước dữ liệu thật (G2).
+Phụ thuộc: Task #10.
+Branch gợi ý: docs/<ISSUE-KEY>-assess-provider-routing-and-legal-baseline
+Acceptance Criteria:
+- [ ] Có tài liệu kiểm kê luồng dữ liệu nhà cung cấp (SEC 04) và khung đánh giá pháp lý SEC 03/VN 05.
+- [ ] Không tự kết luận phân loại AI hay miễn trừ pháp lý thay Legal Owner.","High","G0 SEC03 SEC04 VN05 SRS-NFR-09 SRS-NFR-10 Squad-D Squad-C Role-D2 Role-C3","security-infra","Gate-G0-Discovery","2026-11-11","2026-11-18","8h","","3","8","10","8, 41"
+"13","Task","1","Design eval plan and 60 dev tasks","Gate: G0 | SRS: Mục 3.2, Mục 8.1, SRS-FR-08.2 | RFP: VN02, DEL01
+Phụ trách: D1 (Independent QA & Eval Lead) — CẤM Squad B/C xem dữ liệu Sealed
+Chi tiết công việc:
+- Thiết kế kế hoạch nghiệm thu độc lập (docs/architecture/testing-tiers.md) quy định phân vùng 200 tác vụ thực (60 Dev / 40 Val / 100 Sealed), 80 thử thách (40 VN02), giữ biến thể/bản ghi liên quan cùng partition.
+- Thiết lập quy trình hai người rà soát chính sách thống nhất nhãn điều khoản, ngày, phạm vi, ngoại lệ và chuyển xử lý.
+- Chuẩn bị phân vùng công khai 60 Dev (và lập kho cách ly bảo mật cho phần Sealed chuẩn bị sau).
+Phụ thuộc: Task #9.
+Branch gợi ý: test/<ISSUE-KEY>-design-eval-plan-and-60-dev-tasks
+Acceptance Criteria:
+- [ ] Có tài liệu quy chuẩn kiểm thử độc lập và mẫu số báo cáo rõ ràng (gồm hold/lỗi).
+- [ ] Bộ 60 Dev tasks được tách sạch dữ liệu cá nhân thật và lưu đúng partition.","High","G0 VN02 DEL01 SRS-FR-08 Squad-D Role-D1","qa-eval","Gate-G0-Discovery","2026-11-12","2026-11-19","12h","","3","30","9","30"
+"14","Epic","","Gate G1 - Controlled Offline Knowledge Core","Cổng G1 (Controlled Offline - Tuần 3–5): Hoàn thiện toàn bộ corpus đã duyệt (<=300 passages, <=50 critical rows), xây dựng 2 CSV validators/quarantine/manifest, RBAC, Policy Lifecycle & Applicability giờ VN, Typed Critical Fields, Hybrid Retrieval, Answer Orchestrator & Citation Validation. Đạt toàn bộ test offline trên 60 Dev + 40 Val.","Highest","G1 WP02 WP03 WP05 DEL02","backend-policy","Gate-G1-Controlled-Offline","2026-11-20","2026-12-10","","","","31","1","31"
+"15","Story","14","G1-S1 Build identity ingestion and policy state","Story G1-S1: Nạp dữ liệu 2 CSV UTF-8 có đối soát, cách ly dòng lỗi/thiếu chú thích, bảo vệ idempotent/tombstone, phân quyền RBAC tối thiểu và quản trị vòng đời chính sách 7 trạng thái. Tham chiếu SRS: SRS-FR-02, SRS-FR-03, SRS-FR-04.2.","Highest","G1 WP02 WP05 SEC01 DAT01 DAT02 DAT08","backend-ingestion","Gate-G1-Controlled-Offline","2026-11-20","2026-12-01","","","","16","3","16"
+"16","Story","14","G1-S2 Build retrieval critical fields and answer","Story G1-S2: Xây dựng Policy Applicability giờ VN, Typed Critical Fields & Conflict Hold, Hybrid Retrieval tiếng Việt, Constrained Answer Orchestrator (<=2 calls, 6000/900 tokens) và Validation kiểm tra cuối trước khi hiển thị. Tham chiếu SRS: SRS-FR-04, SRS-FR-05, SRS-FR-06.","Highest","G1 WP03 WP04 ANS01 ANS08 DEL02","backend-answer","Gate-G1-Controlled-Offline","2026-11-27","2026-12-10","","","","32","15","32"
+"17","Task","14","Create Alembic migrations for core schema","Gate: G1 | SRS: Mục 7.3, SRS-FR-03, SRS-FR-04 | RFP: DAT01, DAT02, SEC01
+Phụ trách: B1 (Data Eng), B2 (Policy Eng), C3 (SecOps Eng)
+Chi tiết công việc:
+- Viết SQLAlchemy ORM models và Alembic migration khởi tạo toàn bộ bảng lõi theo docs/architecture/erd-and-csv-contract.md (identity, knowledge, policy, ingestion, referral, feedback, audit, evaluation).
+- Đảm bảo cột vector pgvector, index FTS unaccent và các ràng buộc khóa ngoại/timestamp múi giờ VN.
+Phụ thuộc: Task #9, Task #11.
+Branch gợi ý: feat/<ISSUE-KEY>-create-alembic-migrations-for-core-schema
+Acceptance Criteria:
+- [ ] alembic upgrade head chạy sạch trên PostgreSQL 16 + pgvector + unaccent.
+- [ ] Tất cả models trong backend/src/modules/*/models.py đồng bộ với migrations/env.py.","Highest","G1 DAT01 DAT02 SEC01 SRS-FR-03 SRS-FR-04 Squad-B Squad-C Role-B1 Role-B2 Role-C3","backend-ingestion","Gate-G1-Controlled-Offline","2026-11-20","2026-11-24","12h","","15","18","9, 11","18, 19, 21"
+"18","Task","14","Build RBAC auth and audience middleware","Gate: G1 | SRS: SRS-FR-02 | RFP: SEC01, SEC06
+Phụ trách: C3 (Identity, Security & DevOps Eng)
+Chi tiết công việc:
+- Triển khai module identity và backend/src/shared/auth.py: JWT token validation, least-privilege dependency require_roles(), và kiểm tra policy audience.
+- Áp dụng guard lên toàn bộ API, citation/evidence lookup, snippet, download và log endpoints.
+- Fail closed (HTTP 401/403/503) khi không xác minh được danh tính hoặc quyền truy cập.
+Phụ thuộc: Task #17.
+Branch gợi ý: feat/<ISSUE-KEY>-build-rbac-auth-and-audience-middleware
+Acceptance Criteria:
+- [ ] Người dùng thiếu quyền bị từ chối ở cả API search, direct passage link, citation và export.
+- [ ] Có unit test cho mọi vai trò RFP và kịch bản fail-closed.","Highest","G1 SEC01 SEC06 SRS-FR-02 Squad-C Role-C3","security-infra","Gate-G1-Controlled-Offline","2026-11-24","2026-11-28","16h","","15","34","17","34"
+"19","Task","14","Build 2 CSV validators and quarantine","Gate: G1 | SRS: SRS-FR-03.1, SRS-FR-03.4 | RFP: WP02, DAT01, DAT08, OPS01, VN03
+Phụ trách: B1 (Data & Ingestion Eng)
+Chi tiết công việc:
+- Xây dựng 2 validator UTF-8 cho passages (21 cột, <=6000 ký tự Unicode) và critical_fields (23 cột, đủ kiểu/toán tử/đơn vị/tiền tệ); tuyệt đối không nạp hồ sơ KH hay mở đường dẫn O1 trong Base Scope.
+- Cách ly (Quarantine) dòng sai định dạng, vượt 6000 ký tự, thiếu chú thích/bảng/phụ lục thiết yếu (has_essential_attachments=false) kèm lý do rõ ràng.
+- Sinh Manifest đối soát expected/received/accepted/rejected/quarantined qua worker/src/tasks/import_task.py.
+Phụ thuộc: Task #17.
+Branch gợi ý: feat/<ISSUE-KEY>-build-2-csv-validators-and-quarantine
+Acceptance Criteria:
+- [ ] 100% dòng CSV đầu vào đều được hạch toán trong Manifest, không bỏ sót âm thầm.
+- [ ] Dòng lỗi schema hoặc thiếu phụ lục thiết yếu vào bảng quarantine_rows kèm mã lỗi.","Highest","G1 WP02 DAT01 DAT08 OPS01 VN03 SRS-FR-03 Squad-B Role-B1","backend-ingestion","Gate-G1-Controlled-Offline","2026-11-24","2026-11-30","16h","","15","20","17","20, 22"
+"20","Task","14","Implement idempotent retry and tombstone","Gate: G1 | SRS: SRS-FR-03.3, SRS-FR-03.5 | RFP: DAT02, KNW04
+Phụ trách: B1 (Data & Ingestion Eng)
+Chi tiết công việc:
+- Triển khai batch_type (full_snapshot vs delta), retry idempotent (không tạo bản ghi trùng), bảo vệ chống batch đến muộn ghi đè phiên bản mới hơn.
+- Xử lý xóa qua record_action=tombstone hoặc đối soát full_snapshot đã duyệt (cấm suy diễn xóa từ dòng vắng mặt).
+- Lưu mốc cập nhật để tính Snapshot Age và Celery Beat job check_staleness (>25 giờ).
+Phụ thuộc: Task #19.
+Branch gợi ý: feat/<ISSUE-KEY>-implement-idempotent-retry-and-tombstone
+Acceptance Criteria:
+- [ ] Test chạy lại cùng batch không nhân đôi dòng; late batch bị chặn/cách ly.
+- [ ] Dòng vắng mặt trong delta không tự xóa bản ghi; tombstone xóa chính xác và ghi audit.","Highest","G1 DAT02 KNW04 SRS-FR-03 Squad-B Role-B1","backend-ingestion","Gate-G1-Controlled-Offline","2026-11-30","2026-12-03","12h","","15","23","19","23, 38"
+"21","Task","14","Build policy registry and lifecycle state","Gate: G1 | SRS: SRS-FR-04.2 | RFP: WP05, KNW03
+Phụ trách: B2 (Policy & Lifecycle Eng)
+Chi tiết công việc:
+- Triển khai máy trạng thái 7 cấp chính thức (draft -> owner_reviewed -> approved -> scheduled -> effective -> superseded -> withdrawn) cùng feedback_candidate & quarantined trong module policy.
+- Ghi bắt buộc actor_id, role, timestamp và lý do cho mọi chuyển trạng thái.
+- Viết Celery task activate_scheduled_policies chỉ kích hoạt chính sách scheduled khi đến đúng mốc effective_from theo giờ Asia/Ho_Chi_Minh.
+Phụ thuộc: Task #17.
+Branch gợi ý: feat/<ISSUE-KEY>-build-policy-registry-and-lifecycle-state
+Acceptance Criteria:
+- [ ] Chính sách scheduled tuyệt đối không lọt vào tập effective trước thời điểm hiệu lực giờ VN.
+- [ ] Mọi chuyển trạng thái có log actor/timestamp và kiểm tra đúng vai trò phê duyệt.","Highest","G1 WP05 KNW03 SRS-FR-04 Squad-B Role-B2","backend-policy","Gate-G1-Controlled-Offline","2026-11-24","2026-11-28","16h","","15","23","17","23, 24, 37"
+"22","Task","14","Curate full G1 corpus and critical rows","Gate: G1 | SRS: Mục 2.2, SRS-FR-03.1 | RFP: DAT01, DAT08, VN04
+Phụ trách: A2 (Knowledge Steward) phối hợp A1
+Chi tiết công việc:
+- Mở rộng kho tri thức từ mẫu G0 lên bộ đầy đủ đã duyệt của 3 nhóm chính sách trong giới hạn bid (<=30 tài liệu, <=300 passages, <=50 critical rows).
+- Đối chiếu thủ công bảng, sơ đồ, chú thích từ tài liệu gốc (không tự ý đặt rule đạt quota).
+- Import và đối soát thành công 100% vào hệ thống offline G1.
+Phụ thuộc: Task #6, Task #19.
+Branch gợi ý: chore/<ISSUE-KEY>-curate-full-g1-corpus-and-critical-rows
+Acceptance Criteria:
+- [ ] Bộ dữ liệu UTF-8 đầy đủ vượt qua 2 CSV validators với 0 dòng lỗi ngoài ý muốn.
+- [ ] Chủ sở hữu chính sách xác nhận đủ điều khoản và tham chiếu bản gốc trước G1.","High","G1 DAT01 DAT08 VN04 SRS-FR-03 Squad-A Role-A2","data-curation","Gate-G1-Controlled-Offline","2026-11-25","2026-12-04","24h","","15","26","6, 19","26, 30"
+"23","Task","14","Mount 12 routers and AnswerPackage schema","Gate: G1 | SRS: Mục 4.3, Mục 7.2, SRS-FR-06.1 | RFP: ANS03, ANS04, DEL02
+Phụ trách: C1 (LLM Eng), B2 (Policy Eng), B3 (Retrieval Eng)
+Chi tiết công việc:
+- Đảm bảo 12 module routers (bao gồm retrieval, validation, referral) gắn đủ trong backend/src/main.py cùng global exception handlers (fail-closed).
+- Khóa cứng Pydantic v2 schema AnswerPackage 7 phần và CriticalFieldItem trong answer/schemas.py và policy/schemas.py.
+Phụ thuộc: Task #10, Task #20, Task #21.
+Branch gợi ý: feat/<ISSUE-KEY>-mount-12-routers-and-answerpackage-schema
+Acceptance Criteria:
+- [ ] /docs hiển thị đủ 12 nhóm endpoint dưới /api/v1/*.
+- [ ] Test hợp đồng JSON AnswerPackage pass cả 7 trường bắt buộc.","High","G1 ANS03 ANS04 DEL02 SRS-FR-06 Squad-C Squad-B Role-C1 Role-B3","backend-answer","Gate-G1-Controlled-Offline","2026-12-01","2026-12-03","8h","","16","24","10, 20, 21","24, 26, 27, 34"
+"24","Task","14","Build applicability and VN governing date","Gate: G1 | SRS: SRS-FR-04.3, SRS-NFR-03 | RFP: WP03, DAT04, ANS02, OPS03
+Phụ trách: B2 (Policy & Lifecycle Eng)
+Chi tiết công việc:
+- Xây dựng Policy Applicability Engine lọc audience, publication status, phạm vi (company/branch/role/customer_group/product/transaction) và governing_date theo Asia/Ho_Chi_Minh.
+- Phân biệt câu hỏi hiện tại, câu hỏi giao dịch lịch sử (lấy superseded hiệu lực tại ngày giao dịch, gắn cờ is_historical) và câu hỏi tương lai.
+- Bảo toàn lịch sử cũ khi có chỉnh sửa hồi tố và hỏi làm rõ khi thiếu ngày/phạm vi tiên quyết.
+Phụ thuộc: Task #21, Task #23.
+Branch gợi ý: feat/<ISSUE-KEY>-build-applicability-and-vn-governing-date
+Acceptance Criteria:
+- [ ] Unit tests OPS 03 pass tại ranh giới trước/đúng/sau 00:00:00 giờ Việt Nam và ca hồi tố.
+- [ ] Lỗi trạng thái DB kích hoạt AuthorityUnavailable (fail-closed).","Highest","G1 WP03 DAT04 ANS02 OPS03 SRS-FR-04 SRS-NFR-03 Squad-B Role-B2","backend-policy","Gate-G1-Controlled-Offline","2026-12-01","2026-12-05","16h","","16","25","21, 23","25"
+"25","Task","14","Build critical fields and conflict hold","Gate: G1 | SRS: SRS-FR-04.4, SRS-FR-04.5 | RFP: DAT05, DAT06, ANS04, OPS04
+Phụ trách: B2 (Policy & Lifecycle Eng)
+Chi tiết công việc:
+- Xây dựng Typed Critical Field Resolver truy xuất giá trị có kiểu (ngưỡng, toán tử, đơn vị, tiền tệ, approval_role, time_limit, ngoại lệ, tài liệu bắt buộc) trực tiếp từ DB.
+- Phát hiện nguồn chồng lấn hiệu lực, hợp đồng mâu thuẫn chính sách (DAT 05) hoặc thiếu chú thích/bảng (DAT 08) -> kích hoạt trạng thái HOLD kèm bằng chứng và chuyển chủ sở hữu.
+- Không tự suy diễn thứ bậc ưu tiên hợp đồng vs chính sách và không để LLM sửa giá trị số.
+Phụ thuộc: Task #24.
+Branch gợi ý: feat/<ISSUE-KEY>-build-critical-fields-and-conflict-hold
+Acceptance Criteria:
+- [ ] Test OPS 04 pass dưới/bằng/trên ngưỡng, thiếu tiền tệ/đơn vị và có ngoại lệ.
+- [ ] Xung đột hợp đồng hoặc thiếu footnote kích hoạt HOLD chính xác.","Highest","G1 DAT05 DAT06 ANS04 OPS04 SRS-FR-04 Squad-B Role-B2","backend-policy","Gate-G1-Controlled-Offline","2026-12-04","2026-12-08","16h","","16","28","24","28"
+"26","Task","14","Build Vietnamese hybrid retrieval and index","Gate: G1 | SRS: SRS-FR-05, SRS-NFR-12 | RFP: WP03, ANS02, VN01, DEL02
+Phụ trách: B3 (Retrieval & Index Eng)
+Chi tiết công việc:
+- Triển khai worker/src/tasks/index_task.py tạo embeddings và lưu vào pgvector + chỉ mục FTS PostgreSQL (unaccent).
+- Xây dựng hybrid retrieval trong module retrieval: chỉ tìm trên tập văn bản đã qua pre-filter (audience, status, date, scope).
+- Hỗ trợ tiếng Việt có/không dấu, từ đồng nghĩa/viết tắt CRM đã duyệt và thuật ngữ sản phẩm tiếng Anh; giữ tối đa 8 đoạn/truy vấn.
+Phụ thuộc: Task #22, Task #23.
+Branch gợi ý: feat/<ISSUE-KEY>-build-vietnamese-hybrid-retrieval-and-index
+Acceptance Criteria:
+- [ ] Pre-filter chạy trước vector/FTS search; bản draft/withdrawn/khác audience không bao giờ lọt vào top-K.
+- [ ] Test tiếng Việt không dấu & viết tắt CRM đạt Recall@5 >= 90% trên tập 60 Dev.","Highest","G1 WP03 ANS02 VN01 DEL02 SRS-FR-05 SRS-NFR-12 Squad-B Role-B3","backend-retrieval","Gate-G1-Controlled-Offline","2026-12-01","2026-12-07","20h","","16","27","22, 23","27, 62"
+"27","Task","14","Build constrained answer orchestrator","Gate: G1 | SRS: SRS-FR-06.1, SRS-FR-06.2 | RFP: WP04, ANS01, ANS03, ANS05, ANS06, ANS07, ANS08, VN01
+Phụ trách: C1 (Answer & Validation LLM Eng)
+Chi tiết công việc:
+- Xây dựng Answer Orchestrator trong module answer kết hợp prompts/answer_system_vi.txt.
+- Tuân thủ giới hạn mô hình: tối đa 2 calls/package, <=6000 input / <=900 output tokens, trả lời 100–250 từ tiếng Việt phân tách nguyên văn trích dẫn với diễn giải.
+- Bảo vệ chống Prompt Injection (ANS 08), từ chối câu hỏi ngoài ranh giới pháp lý/thuế/sửa chữa/tự duyệt (ANS 07), đặt câu hỏi làm rõ khi thiếu dữ kiện (ANS 06) và xử lý ngoại lệ không suy đoán (ANS 05).
+Phụ thuộc: Task #23, Task #26.
+Branch gợi ý: feat/<ISSUE-KEY>-build-constrained-answer-orchestrator
+Acceptance Criteria:
+- [ ] Không gọi web search, không dùng memory model bổ sung quy tắc thiếu, không chứa secret trong prompt.
+- [ ] Pass kiểm thử Prompt Injection, thiếu dấu, phủ định và giới hạn 2 calls/package.","Highest","G1 WP04 ANS01 ANS03 ANS05 ANS06 ANS07 ANS08 VN01 SRS-FR-06 Squad-C Role-C1","backend-answer","Gate-G1-Controlled-Offline","2026-12-04","2026-12-08","20h","","16","28","23, 26","28, 29"
+"28","Task","14","Build citation validator and fail closed","Gate: G1 | SRS: INV-03, SRS-FR-06.4 | RFP: ANS04, ANS08, KNW04, SEC05
+Phụ trách: C1 (LLM Eng) phối hợp B2
+Chi tiết công việc:
+- Triển khai module validation kiểm tra mỗi nhận định trọng yếu có citation tồn tại trong evidence được phép, trích đúng clause/page/version và không sửa giá trị critical fields.
+- Thực hiện kiểm tra quyền user & authoritative state lần cuối trước khi trả AnswerPackage (cấm streaming trước khi kiểm tra).
+- Nếu nguồn vừa bị withdrawn hoặc đổi quyền -> chặn xuất và gắn cờ stale.
+Phụ thuộc: Task #25, Task #27.
+Branch gợi ý: feat/<ISSUE-KEY>-build-citation-validator-and-fail-closed
+Acceptance Criteria:
+- [ ] Bịa citation hoặc lệch giá trị critical fields bị chặn 100% (HOLD/error).
+- [ ] Test rút chính sách giữa lúc đang sinh (Worked Case 9) chặn đầu ra thành công.","Highest","G1 ANS04 ANS08 KNW04 SEC05 SRS-FR-06 Squad-C Role-C1","backend-answer","Gate-G1-Controlled-Offline","2026-12-06","2026-12-09","16h","","16","30","25, 27","30, 35, 38, 39"
+"29","Task","14","Add PII input guard and safety boundaries","Gate: G1 | SRS: SRS-NFR-08, SRS-FR-06.2 | RFP: SEC02, ANS07
+Phụ trách: C3 (Identity, Security & DevOps Eng)
+Chi tiết công việc:
+- Hoàn thiện backend/src/shared/pii_guard.py phát hiện/cảnh báo/tối thiểu hóa PII (tên riêng nhạy cảm, SĐT, CCCD/CMND, email cá nhân) trong câu hỏi trước khi gửi tới LLM provider.
+- Kiểm thử bảo đảm dữ liệu cá nhân vô tình xuất hiện được ghi nhận giảm thiểu (nêu rõ khả năng phát hiện không tuyệt đối theo SEC 02).
+Phụ thuộc: Task #27.
+Branch gợi ý: feat/<ISSUE-KEY>-add-pii-input-guard-and-safety-boundaries
+Acceptance Criteria:
+- [ ] Câu hỏi chứa SĐT/CCCD/email khách hàng được cảnh báo và che trước khi gửi LLM.
+- [ ] Không làm hỏng mã chính sách, số tiền hay ngày tháng hợp lệ.","High","G1 SEC02 ANS07 SRS-NFR-08 Squad-C Role-C3","security-infra","Gate-G1-Controlled-Offline","2026-12-06","2026-12-09","10h","","16","30","27","30, 39"
+"30","Task","14","Create 40 val 80 challenges and G1 tests","Gate: G1 | SRS: Mục 8.1, Mục 8.3 | RFP: VN02, OPS01, OPS03, OPS04, DEL02
+Phụ trách: D1 (Eval Lead), D2 (TestOps) — A2 rà nhãn độc lập
+Chi tiết công việc:
+- Hoàn thiện tập 40 Validation và 80 Constructed Challenges (gồm 40 ca VN02: 10 ngôn ngữ, 10 ngày/phạm vi, 10 ngưỡng/ngoại lệ, 10 quyền/thu hồi).
+- Hoàn thiện riêng kho 100 Sealed (cách ly tuyệt đối với Squad B/C).
+- Chạy đánh giá offline G1 trên 60 Dev + 40 Val và đối soát 100% corpus/critical fields để chốt Gate G1.
+Phụ thuộc: Task #13, Task #22, Task #28, Task #29.
+Branch gợi ý: test/<ISSUE-KEY>-create-40-val-80-challenges-and-g1-tests
+Acceptance Criteria:
+- [ ] Có báo cáo kiểm thử offline G1: 100% corpus đối soát khớp, pass quyền/ngày VN/xung đột/citation.
+- [ ] Biên bản Gate G1 ký duyệt mở khóa phát triển UI & Security Hardening (G2).","Highest","G1 VN02 OPS01 OPS03 OPS04 DEL02 SRS-FR-08 Squad-D Role-D1 Role-D2","qa-eval","Gate-G1-Controlled-Offline","2026-12-05","2026-12-10","20h","","16","44","13, 22, 28, 29","44, 62"
+"31","Epic","","Gate G2 - Supervised Use Workspace and Assurance","Cổng G2 (Supervised Use - Tuần 6–7): Hoàn thiện Split-Screen Workspace UI (/chat, /evidence, /admin, /referrals), Local Referral & Feedback Candidates, Instant Withdrawal & 5m Redis cache purge, Audit/Cost Meter, Legal Sign-off (SEC 03), Đào tạo Owner/Staff, Bench OPS 01–07 và Đánh giá Độc lập 100 Sealed + 80 Challenges đạt 0 lỗi trọng yếu.","Highest","G2 WP04 WP05 WP06 DEL02 DEL03","frontend-workspace","Gate-G2-Supervised-Use","2026-12-11","2026-12-24","","","","46","14","46"
+"32","Story","31","G2-S1 Build split screen workspace and governance UI","Story G2-S1: Cung cấp giao diện nội bộ Split-Screen (/chat + Evidence highlight + Deterministic Critical Fields), trang /evidence, /referrals (chuyển xử lý & 5 loại feedback candidate) và /admin (duyệt vòng đời, rút chính sách tức thời, xem Snapshot Age). Tham chiếu SRS: SRS-FR-06, SRS-FR-07, Mục 7.1.","Highest","G2 WP04 WP05 KNW01 KNW07","frontend-workspace","Gate-G2-Supervised-Use","2026-12-11","2026-12-18","","","","33","16","33"
+"33","Story","31","G2-S2 Harden security ops and pass sealed eval","Story G2-S2: Hoàn thiện dọn cache vật lý <=5 phút khi rút chính sách, Audit & Full Cost Meter, Incident/Change Runbook, rà soát pháp lý SEC 03/Annex F, đào tạo người dùng, pass OPS 01–07 và vượt qua đánh giá độc lập 100 Sealed + 80 Challenges (0 lỗi trọng yếu). Tham chiếu SRS: SRS-FR-08, SRS-NFR-01..12.","Highest","G2 WP06 SEC03 SEC08 OPS01 OPS07 DEL03","qa-eval","Gate-G2-Supervised-Use","2026-12-11","2026-12-24","","","","47","32","47"
+"34","Task","31","Build auth layout and evidence viewer UI","Gate: G2 | SRS: Mục 7.1, SRS-FR-06.1 | RFP: KNW01, SEC01
+Phụ trách: C2 (Frontend Workspace Eng)
+Chi tiết công việc:
+- Xây dựng Auth Context, trang đăng nhập / hiển thị vai trò, Snapshot Age, hạn mức và phương án tra cứu thủ công khi có sự cố.
+- Hoàn thiện trang /evidence xem chi tiết tài liệu đã duyệt, phiên bản, điều khoản gốc và trạng thái vòng đời (tuân thủ RBAC audience).
+Phụ thuộc: Task #18, Task #23.
+Branch gợi ý: feat/<ISSUE-KEY>-build-auth-layout-and-evidence-viewer-ui
+Acceptance Criteria:
+- [ ] Người dùng chỉ xem được tài liệu/đoạn thuộc audience được phép.
+- [ ] Direct link mở đúng document_version_id, clause_ref và page_number gốc.","High","G2 KNW01 SEC01 SRS-FR-06 Squad-C Role-C2","frontend-workspace","Gate-G2-Supervised-Use","2026-12-11","2026-12-14","12h","","32","35","18, 23","35, 37"
+"35","Task","31","Build split screen chat workspace UI","Gate: G2 | SRS: Mục 7.1, SRS-FR-06.1 | RFP: WP04, ANS03, ANS04, KNW01, KNW02, DEL02
+Phụ trách: C2 (Frontend Eng) phối hợp C1
+Chi tiết công việc:
+- Xây dựng /chat Split-Screen: Trái = hỏi đáp tiếng Việt, chọn ngày giao dịch/phạm vi, cảnh báo PII, làm rõ & lý do HOLD; Phải = Highlight nguyên văn điều khoản trích dẫn, bảng Critical Fields render xác định từ DB, Snapshot Age và nhãn Lịch sử/Tương lai.
+- Hiển thị cảnh báo sử dụng nội bộ (KNW 02), không có nút xuất nội dung sẵn sàng gửi khách hàng và không stream trước kiểm tra cuối.
+Phụ thuộc: Task #28, Task #34.
+Branch gợi ý: feat/<ISSUE-KEY>-build-split-screen-chat-workspace-ui
+Acceptance Criteria:
+- [ ] UI hiển thị đủ 7 phần AnswerPackage; bảng Critical Fields tách rời hoàn toàn khỏi văn xuôi LLM.
+- [ ] Cảnh báo stale tự động hiện khi nguồn bị thu hồi.","Highest","G2 WP04 ANS03 ANS04 KNW01 KNW02 DEL02 SRS-FR-06 Squad-C Role-C2 Role-C1","frontend-workspace","Gate-G2-Supervised-Use","2026-12-12","2026-12-17","20h","","32","36","28, 34, 62","36, 42"
+"36","Task","31","Build local referral and feedback UI","Gate: G2 | SRS: SRS-FR-07.1, SRS-FR-07.2 | RFP: KNW05, KNW06, KNW07, ANS05, ANS06
+Phụ trách: C1 (BE), C2 (UI)
+Chi tiết công việc:
+- Hoàn thiện backend module referral & feedback cùng trang /referrals.
+- Referral lưu ngữ cảnh tối thiểu và theo dõi tách biệt 3 trạng thái (referred, owner_responded, closed); cấm gửi tin nhắn, tạo tác vụ CRM hay ghi ngược CRM.
+- Feedback hỗ trợ 5 phân loại (missing_source, outdated_rule, wrong_scope, missing_exception, rejected), lưu vào hàng đợi feedback_candidate và thống kê chủ đề chưa trả lời được mà không rò ngữ cảnh trái phép.
+Phụ thuộc: Task #35.
+Branch gợi ý: feat/<ISSUE-KEY>-build-local-referral-and-feedback-ui
+Acceptance Criteria:
+- [ ] Tạo & đóng phiếu referral thành công không gọi API ngoài hệ thống.
+- [ ] Feedback chỉ tạo feedback_candidate, tuyệt đối không tự động sửa quy tắc hay huấn luyện model.","High","G2 KNW05 KNW06 KNW07 ANS05 ANS06 SRS-FR-07 Squad-C Role-C1 Role-C2","frontend-workspace","Gate-G2-Supervised-Use","2026-12-14","2026-12-18","16h","","32","","35",""
+"37","Task","31","Build admin lifecycle and withdraw UI","Gate: G2 | SRS: SRS-FR-04.2, SRS-FR-07.3 | RFP: WP05, KNW03, KNW04
+Phụ trách: C2 (UI), B2 (BE)
+Chi tiết công việc:
+- Hoàn thiện module admin BE & trang /admin: upload 2 CSV, xem Manifest đối soát & Quarantine, luồng duyệt draft -> owner_reviewed -> approved -> scheduled/effective.
+- Bổ sung nút Instant Withdrawal tức thời, nút Emergency Disable và hiển thị Snapshot Age / trạng thái stale.
+Phụ thuộc: Task #21, Task #34.
+Branch gợi ý: feat/<ISSUE-KEY>-build-admin-lifecycle-and-withdraw-ui
+Acceptance Criteria:
+- [ ] Policy Owner thực hiện duyệt hoặc rút chính sách trực tiếp trên UI có ghi actor/timestamp.
+- [ ] Chỉ Steward/Owner/Admin mới truy cập được /admin.","High","G2 WP05 KNW03 KNW04 SRS-FR-04 SRS-FR-07 Squad-C Squad-B Role-C2 Role-B2","frontend-workspace","Gate-G2-Supervised-Use","2026-12-14","2026-12-18","16h","","32","38","21, 34","38"
+"38","Task","31","Implement instant withdraw and 5m cache purge","Gate: G2 | SRS: INV-06, SRS-FR-07.3, SRS-NFR-06 | RFP: SEC05, OPS05, KNW04
+Phụ trách: C3 (SecOps Eng) phối hợp B1
+Chi tiết công việc:
+- Tuần tự hóa thao tác rút chính sách / thu hồi quyền -> ghi DB authoritative state trước khi xác nhận thành công.
+- Hoàn thiện worker withdraw_and_purge_cache xóa sạch Redis cache vật lý trong <= 5 phút (300s), chặn tái sử dụng câu trả lời cache, kiểm tra fail-closed khi không truy cập được trạng thái và đánh dấu stale trên màn hình đang mở.
+Phụ thuộc: Task #20, Task #28, Task #37.
+Branch gợi ý: feat/<ISSUE-KEY>-implement-instant-withdraw-and-5m-cache-purge
+Acceptance Criteria:
+- [ ] Kiểm thử độc lập xác nhận cache vật lý dọn sạch trong <= 5 phút (OPS 05).
+- [ ] Sau khi xác nhận thu hồi, không phục vụ mới hoặc tái sử dụng kết quả cũ.","Highest","G2 SEC05 OPS05 KNW04 SRS-FR-07 SRS-NFR-06 Squad-C Squad-B Role-C3 Role-B1","security-infra","Gate-G2-Supervised-Use","2026-12-15","2026-12-18","16h","","33","40","20, 28, 37","40, 43, 44"
+"39","Task","31","Implement audit log and full cost meter","Gate: G2 | SRS: SRS-FR-08.1 | RFP: WP06, OPS08, DEL05
+Phụ trách: C3 (Identity, Security & DevOps Eng)
+Chi tiết công việc:
+- Hoàn thiện module audit ghi nhật ký truy cập, citation, hold, withdrawal, thay đổi và sự cố (hạn chế quyền đọc, không chứa secret/PII thừa).
+- Triển khai Full Cost Meter ghi nhận toàn bộ package (tính cả hold & error), retry, regenerate, input/output tokens, embedding, indexing và storage.
+- Cưỡng chế giới hạn 1000 packages/tháng và 2000 calls/tháng: hiển thị hold rõ ràng khi vượt cap (OPS 08).
+Phụ thuộc: Task #28, Task #29.
+Branch gợi ý: feat/<ISSUE-KEY>-implement-audit-log-and-full-cost-meter
+Acceptance Criteria:
+- [ ] Dashboard /admin hiển thị đủ cost/calls/tokens/holds/errors theo mẫu số tổng.
+- [ ] Vượt ngưỡng 2000 calls hoặc 1000 packages hệ thống từ chối/hold rõ ràng không âm thầm retry.","Highest","G2 WP06 OPS08 DEL05 SRS-FR-08 Squad-C Role-C3","security-infra","Gate-G2-Supervised-Use","2026-12-13","2026-12-17","16h","","33","40","28, 29","40, 43"
+"40","Task","31","Write incident runbook and change control","Gate: G2 | SRS: SRS-NFR-04, SRS-NFR-09 | RFP: SEC07, SEC08, KNW02
+Phụ trách: A1 (PM/BA), C3 (SecOps), D2 (Ops)
+Chi tiết công việc:
+- Soạn docs/incident-runbook.md quy định xử lý lỗi trọng yếu (tiết lộ trái phép, bịa phê duyệt/ngưỡng, hiển thị nguồn đã thu hồi), disable luồng ảnh hưởng, chuyển tra cứu thủ công, bảo toàn bằng chứng.
+- Quy định mục tiêu vận hành: ACK 2h hỗ trợ, cô lập 4h hỗ trợ (08:00–17:00 VN) và thông báo sự cố nghi ngờ dữ liệu/kiểm soát trọng yếu trong 4h liên tục (SEC 07).
+- Chuẩn hóa quy trình Change Control (SEC 08) & rollback trước khi đổi model/prompt/selector/scope.
+Phụ thuộc: Task #38, Task #39.
+Branch gợi ý: docs/<ISSUE-KEY>-write-incident-runbook-and-change-control
+Acceptance Criteria:
+- [ ] Có docs/incident-runbook.md và kịch bản diễn tập disable + fallback thủ công trước G2.
+- [ ] Quy trình change control có bước retest phần bị ảnh hưởng.","High","G2 SEC07 SEC08 KNW02 SRS-NFR-04 SRS-NFR-09 Squad-A Squad-C Squad-D Role-A1 Role-C3 Role-D2","ops-handover","Gate-G2-Supervised-Use","2026-12-16","2026-12-19","10h","","33","42","38, 39","42, 59"
+"41","Task","31","Complete SEC03 legal and retention signoff","Gate: G2 | SRS: SRS-NFR-10, SRS-NFR-11 | RFP: SEC03, SEC04, VN05
+Phụ trách: A1 (PM/BA), D2 (Ops), C3 (SecOps)
+Chi tiết công việc:
+- Hoàn thiện hồ sơ đánh giá pháp lý triển khai trước dữ liệu thật (docs/legal-privacy-review.md): mục đích xử lý, cơ sở hợp pháp, vai trò deployer/provider, thông báo, chuyển dữ liệu và phân loại AI theo Phụ lục F.
+- Trình Legal Owner & Privacy/Security Owner phê duyệt lịch lưu giữ/xóa theo Phụ lục C (<=12 tháng answer/referral, <=90 ngày raw export, 35 ngày backup; xác nhận không tự coi đây là hạn luật định).
+Phụ thuộc: Task #12.
+Branch gợi ý: docs/<ISSUE-KEY>-complete-sec03-legal-and-retention-signoff
+Acceptance Criteria:
+- [ ] Có lập luận phân loại có ngày, ma trận trách nhiệm và chữ ký phê duyệt của Legal/Privacy Owner trước G2.
+- [ ] Mọi tuyến nhà cung cấp và điều khoản cấm train đã được xác nhận.","Highest","G2 SEC03 SEC04 VN05 SRS-NFR-10 SRS-NFR-11 Squad-A Squad-D Squad-C Role-A1 Role-D2 Role-C3","security-infra","Gate-G2-Supervised-Use","2026-12-12","2026-12-19","12h","","33","45","12","45, 59"
+"42","Task","31","Train policy owners and pilot staff users","Gate: G2 | SRS: Mục 3.2, SRS-FR-06.1 | RFP: KNW02, VN04
+Phụ trách: A1 (PM/BA), A2 (Steward), D1 (QA Lead)
+Chi tiết công việc:
+- Soạn hướng dẫn sử dụng nội bộ (docs/user-training-guide.md) cho Policy Owner và 5 Staff Users đại diện (không dùng dev B/C).
+- Đào tạo cách kiểm tra điều khoản, ngày chi phối, ngoại lệ, nhận biết độ bất định/hold, không đưa PII vào câu hỏi, cách tạo local referral và dùng tra cứu thủ công dự phòng.
+Phụ thuộc: Task #35, Task #40.
+Branch gợi ý: docs/<ISSUE-KEY>-train-policy-owners-and-pilot-staff-users
+Acceptance Criteria:
+- [ ] Có tài liệu đào tạo và biên bản xác nhận hoàn tất đào tạo cho Policy Owners & 5 Pilot Staff Users.
+- [ ] Người dùng chứng minh biết sử dụng phương án dự phòng thủ công trước G2.","High","G2 KNW02 VN04 Squad-A Squad-D Role-A1 Role-A2 Role-D1","governance-docs","Gate-G2-Supervised-Use","2026-12-17","2026-12-21","8h","","33","44","35, 40","44"
+"43","Task","31","Run OPS 01 to 07 load and restore tests","Gate: G2 | SRS: SRS-NFR-01..06 | RFP: WP06, OPS01, OPS02, OPS03, OPS04, OPS05, OPS06, OPS07
+Phụ trách: D2 (TestOps), C3 (SecOps), B1 (Data Eng)
+Chi tiết công việc:
+- Viết & chạy suite OPS 01–07 trong backend/tests/ops/: 500 rows <30p (OPS01), 5 concurrent users p95 <=25s trên 100 req (OPS02), ngày biên VN (OPS03), ngưỡng/thiếu đơn vị (OPS04), pause/resume withdrawal & purge cache 5p (OPS05), health/availability 99.5% (OPS06), backup 35 ngày & restore RTO 4h / RPO 24h có replay deletion/withdrawal/permissions (OPS07).
+Phụ thuộc: Task #38, Task #39.
+Branch gợi ý: test/<ISSUE-KEY>-run-ops-01-to-07-load-and-restore-tests
+Acceptance Criteria:
+- [ ] Toàn bộ OPS 01–07 pass trong môi trường thống nhất và xuất báo cáo thời gian từng giai đoạn, hold, throttling và chi phí.
+- [ ] Kiểm thử restore chứng minh replay đầy đủ trạng thái rút/xóa trước khi mở truy cập.","Highest","G2 WP06 OPS01 OPS02 OPS03 OPS04 OPS05 OPS06 OPS07 SRS-NFR-01 Squad-D Squad-C Squad-B Role-D2 Role-C3 Role-B1","qa-eval","Gate-G2-Supervised-Use","2026-12-18","2026-12-22","20h","","33","45","38, 39","45, 57, 58"
+"44","Task","31","Run sealed 100 and challenges 80 eval","Gate: G2 | SRS: Mục 3.2, Mục 8.1, Mục 8.2 | RFP: VN02, DEL03
+Phụ trách: D1 (Independent QA Lead) + A2 (hỗ trợ rà nhãn chính sách) — CẤM TUYỆT ĐỐI Squad B/C xem ca Sealed
+Chi tiết công việc:
+- Đóng băng bản release candidate tiền G2 (tag git cố định) và chạy đánh giá độc lập qua module evaluation / eval_task.py trên 100 Sealed + 80 Challenges (40 VN02).
+- Báo cáo riêng 100 Sealed vs 80 Challenges; xuất đầy đủ mẫu số (bao gồm hold/lỗi) và so sánh ngưỡng Mục 8 RFP: Critical=0, Applicability>=95%, Grounding>=95%, Completeness>=90%, Recall@5>=90%, Usefulness>=80%, Unanswerable<=5%.
+Phụ thuộc: Task #30, Task #38, Task #42.
+Branch gợi ý: test/<ISSUE-KEY>-run-sealed-100-and-challenges-80-eval
+Acceptance Criteria:
+- [ ] Báo cáo đánh giá độc lập tách riêng Real vs Challenges và ghi rõ mẫu số/lỗi theo từng ca.
+- [ ] Nếu có bất kỳ lỗi trọng yếu nào, lập tức chặn phát hành G2 và chuyển ticket khử định danh cho dev.","Highest","G2 VN02 DEL03 SRS-FR-08 Squad-D Role-D1 Role-A2","qa-eval","Gate-G2-Supervised-Use","2026-12-19","2026-12-22","16h","","33","45","30, 38, 42","45"
+"45","Task","31","Fix G2 findings and run independent retest","Gate: G2 | SRS: Mục 3.2, Mục 8.3 | RFP: SEC08, DEL02, DEL03
+Phụ trách: B1–B3, C1–C2 (sửa lỗi từ mô tả khử định danh); D1 (retest độc lập)
+Chi tiết công việc:
+- Khắc phục các lỗi được phát hiện từ OPS 01–07 hoặc đánh giá G2 (tuyệt đối không dùng ca Sealed bị lộ để tune; nếu lộ phải thay thế ca mới).
+- Đánh giá tác động thay đổi theo SEC 08 và chạy kiểm thử lại độc lập trước khi ký Gate G2.
+Phụ thuộc: Task #41, Task #43, Task #44.
+Branch gợi ý: fix/<ISSUE-KEY>-fix-g2-findings-and-run-independent-retest
+Acceptance Criteria:
+- [ ] 0 critical defects còn mở; toàn bộ ngưỡng Mục 8 RFP đạt 100%.
+- [ ] Biên bản Gate G2 được ký duyệt chính thức trước khi mở Supervised Pilot.","Highest","G2 SEC08 DEL02 DEL03 Squad-B Squad-C Squad-D Role-D1 Role-B3","qa-eval","Gate-G2-Supervised-Use","2026-12-22","2026-12-24","16h","","33","49","41, 43, 44","49, 50"
+"62","Task","31","Tune Vietnamese retrieval and CRM glossary","Gate: G2 | SRS: Mục 4.2, SRS-FR-04.1, SRS-NFR-08 | RFP: VN01, ANS02, OPS02
+Phụ trách: B3 (Retrieval & Index Engineer) phối hợp A2
+Chi tiết công việc:
+- Tinh chỉnh truy hồi tiếng Việt (từ đồng nghĩa CRM, thuật ngữ sản phẩm/dịch vụ Song Nhật, từ điển có dấu và không dấu `unaccent`) chỉ trên tập `60 Dev + 40 Val` (tuân thủ nghiêm Chinese Wall, tuyệt đối không chạm `100 Sealed`).
+- Đo và tối ưu truy hồi RRF (`BM25 + pgvector`), giảm lỗi thiếu ngữ cảnh hoặc trỏ nhầm phiên bản cho trường hợp đa điều kiện trước vòng retest G2.
+Phụ thuộc: Đóng băng `40 Val` và pipeline truy hồi từ G1.
+Branch gợi ý: feat/<KEY>-tune-vietnamese-retrieval-and-crm-glossary
+Acceptance Criteria:
+- [ ] Bộ đồng nghĩa tiếng Việt CRM (`VN01`) được kiểm chứng trên `60 Dev + 40 Val` với top-8 recall đạt ngưỡng nội bộ.
+- [ ] Nhật ký tinh chỉnh chứng minh zero-access vào `100 Sealed` của Squad D.
+- [ ] Độ trễ truy hồi kết hợp giữ ổn định trong ngân sách p95 <= 8s (`OPS02`).","High","G2 VN01 ANS02 OPS02 SRS-FR-04 Squad-B Role-B3 Role-A2","backend-retrieval","Gate-G2-Supervised-Use","2026-12-12","2026-12-16","16h","","32","35","26, 30","35"
+"46","Epic","","Gate G3 - Pilot Acceptance and Value Case","Cổng G3 (Pilot Acceptance - Tuần 8–11, tối thiểu 20 ngày làm việc): Vận hành thử nghiệm có giám sát với >=5 nhân sự phi-lập-trình, đo lường đầy đủ tác vụ, lượt thử, hold, lỗi, công sức chuẩn bị/kiểm tra/dự phòng so với thư viện tìm kiếm đã làm sạch; lập báo cáo DEL 03, TCO 3 năm DEL 05 (hoàn vốn <=24 tháng) và quyết định G3 tách riêng nghiệm thu với đầu tư mở rộng.","Highest","G3 WP06 DEL03 DEL05 VN06","qa-eval","Gate-G3-Pilot-Acceptance","2026-12-25","2027-01-25","","","","54","31","54"
+"47","Story","46","G3-S1 Execute 20 business day supervised pilot","Story G3-S1: Thực hiện tối thiểu 20 ngày làm việc sử dụng có giám sát với >=5 người dùng đại diện (không tính dev Squad B/C), ghi nhận trung thực từng tác vụ duy nhất, công sức tổng và các sự kiện vận hành. Tham chiếu SRS: Mục 8.2, Mục 8.3.","Highest","G3 WP06 DEL03","qa-eval","Gate-G3-Pilot-Acceptance","2026-12-25","2027-01-22","","","","48","33","48"
+"48","Story","46","G3-S2 Deliver pilot evidence TCO and G3 decision","Story G3-S2: Tổng hợp báo cáo bằng chứng Pilot (DEL 03), phân tích TCO 3 năm VND/VAT & hoàn vốn Annex E (DEL 05) và chốt quyết định Gate G3 tách biệt nghiệm thu sản phẩm với mở rộng đầu tư. Tham chiếu SRS: Mục 8.3 (DEL 03, DEL 05).","Highest","G3 DEL03 DEL05 VN06","ops-handover","Gate-G3-Pilot-Acceptance","2027-01-18","2027-01-25","","","","55","47","55"
+"49","Task","46","Execute 20 day supervised pilot observation","Gate: G3 | SRS: Mục 3.2, Mục 8.2, Mục 8.3 | RFP: WP06, DEL03
+Phụ trách: A1 (PM/BA), D1 (Eval Lead) cùng >=5 non-dev Staff Users (A1, A2, D1, D2 + đại diện nghiệp vụ; CẤM dev B/C tham gia làm user thử)
+Chi tiết công việc:
+- Tổ chức sử dụng có giám sát tối thiểu 20 ngày làm việc (khung 2026-12-25 đến 2027-01-22 đã tính trừ nghỉ lễ 2027-01-01; tự động gia hạn nếu thiếu ngày làm việc hoặc lưu lượng thấp).
+- Khởi động sớm từ 2026-12-24 nếu Gate G2 được chốt sớm (đạt 21 ngày làm việc, dự phòng 1 ngày); mốc cơ sở 2026-12-25 → 2027-01-22 đạt đúng 20 ngày làm việc.
+- So sánh song song với cùng corpus đã làm sạch có thể tìm kiếm (cân bằng tác vụ/nhân sự).
+- Ghi nhận mỗi tác vụ duy nhất 1 lần: chuẩn bị, kiểm tra, lần thử thất bại, hold, fallback, chỉnh sửa, kết quả thô vs kết quả nhân viên thực dùng.
+Phụ thuộc: Task #45 (Gate G2 passed).
+Branch gợi ý: chore/<ISSUE-KEY>-execute-20-day-supervised-pilot-observation
+Acceptance Criteria:
+- [ ] Đủ log >=20 ngày làm việc hoàn chỉnh từ >=5 non-dev users, không rút ngắn để kịp lịch.
+- [ ] Ghi đủ số liệu baseline vs assisted cho cả hai nhóm trên cùng corpus.","Highest","G3 WP06 DEL03 Squad-A Squad-D Role-A1 Role-D1","qa-eval","Gate-G3-Pilot-Acceptance","2026-12-25","2027-01-22","40h","","47","51","45","51"
+"50","Task","46","Monitor pilot cost staleness and changes","Gate: G3 | SRS: SRS-FR-07.2, SRS-FR-08.1 | RFP: KNW07, SEC08, OPS06
+Phụ trách: A2 (Steward), C3 (SecOps), D2 (Ops)
+Chi tiết công việc:
+- Theo dõi hằng ngày Snapshot Age, batch nhập liệu, trạng thái availability (mục tiêu 99.5% 08:00–17:00 VN), cost/quota caps và độ trễ thực tế.
+- Tổng hợp báo cáo chủ đề thường xuyên không trả lời được từ feedback (KNW 07) mà không làm lộ ngữ cảnh trái phép; xử lý chỉnh sửa tri thức qua quy trình duyệt & Change Control (SEC 08).
+Phụ thuộc: Task #45.
+Branch gợi ý: chore/<ISSUE-KEY>-monitor-pilot-cost-staleness-and-changes
+Acceptance Criteria:
+- [ ] Không có thay đổi rule/prompt/selector nào đưa vào pilot mà thiếu Change Approval & retest.
+- [ ] Báo cáo mức dùng & lỗi/hold hằng ngày được lưu trữ đầy đủ phục vụ G3.","High","G3 KNW07 SEC08 OPS06 SRS-FR-07 SRS-FR-08 Squad-A Squad-C Squad-D Role-A2 Role-C3 Role-D2","ops-handover","Gate-G3-Pilot-Acceptance","2026-12-25","2027-01-22","24h","","47","51","45","51, 52"
+"51","Task","46","Compile DEL03 pilot effort and quality report","Gate: G3 | SRS: Mục 8.2, Mục 8.3 | RFP: DEL03, VN06
+Phụ trách: D1 (Independent QA Lead), A1 (PM/BA)
+Chi tiết công việc:
+- Dựng bản nháp song song bằng số liệu tạm từ 2027-01-18; chốt số liệu cuối ngay sau khi Pilot kết thúc 2027-01-22.
+- Tổng hợp số liệu Pilot sau tối thiểu 20 ngày làm việc: độ bao phủ, trung vị, IQR, độ bất định, số nhận định/tác vụ, kết quả thô vs nhân viên sử dụng và chất lượng kiểm toán.
+- Đánh giá mục tiêu giảm >=20% công sức tổng trung bình của nhân viên với chất lượng kiểm toán ngang bằng hoặc tốt hơn.
+- Phân tích nguyên nhân gốc nếu chỉ số không đạt (cấm làm yếu chỉ số hoặc loại ca hold/lỗi khỏi mẫu số).
+Phụ thuộc: Task #49, Task #50.
+Branch gợi ý: docs/<ISSUE-KEY>-compile-del03-pilot-effort-and-quality-report
+Acceptance Criteria:
+- [ ] Báo cáo DEL 03 tính đúng mẫu số (gồm hold, lỗi, retry, fallback, bảo trì) và công khai độ bất định.
+- [ ] Tách bạch kết quả chất lượng ngoại tuyến với kết quả sử dụng thực tế.","Highest","G3 DEL03 VN06 SRS-FR-08 Squad-D Squad-A Role-D1 Role-A1","qa-eval","Gate-G3-Pilot-Acceptance","2027-01-18","2027-01-23","16h","","48","52","49, 50","52, 53"
+"52","Task","46","Build DEL05 3 year TCO and payback analysis","Gate: G3 | SRS: Mục 8.3 | RFP: DEL05, VN06, Annex E
+Phụ trách: D2 (Commercial Analyst), A1 (PM/BA)
+Chi tiết công việc:
+- Lập hồ sơ thương mại DEL 05 tách riêng: discovery, hỗ trợ tuyển chọn, xây dựng, nhập liệu, giấy phép, hosting, phí model/retrieval, kiểm thử, đào tạo, bảo trì, hỗ trợ, tùy chọn và bàn giao.
+- Tính tổng chi phí 3 năm bằng VND và cách xử lý VAT; bao gồm mọi lượt hold, retry, regenerate, embedding, indexing, storage và chi phí chủ sở hữu bảo trì.
+- Tái lập phân tích độ nhạy Annex E kiểm tra ngưỡng hoàn vốn đơn giản <=24 tháng (không coi mức giá minh họa trong RFP là báo giá đã xác minh).
+Phụ thuộc: Task #50, Task #51.
+Branch gợi ý: docs/<ISSUE-KEY>-build-del05-3-year-tco-and-payback-analysis
+Acceptance Criteria:
+- [ ] Bảng tính TCO 3 năm (VND + VAT) bao phủ đủ chi phí thực tế, giả định khối lượng tối đa và rủi ro tỷ giá/giấy phép tối thiểu.
+- [ ] Có phân tích độ nhạy và đối chiếu 3 phương án theo dữ liệu pilot thật.","Highest","G3 DEL05 VN06 Squad-D Squad-A Role-D2 Role-A1","ops-handover","Gate-G3-Pilot-Acceptance","2027-01-19","2027-01-23","16h","","48","53","50, 51","53"
+"53","Task","46","Record separate G3 acceptance and expansion","Gate: G3 | SRS: Mục 8.3 | RFP: DEL03, DEL05, VN06
+Phụ trách: A1 (PM/BA), D1 (Eval Lead), D2 (Commercial)
+Chi tiết công việc:
+- Trình Sponsor báo cáo DEL 03 + DEL 05 để chốt Gate G3.
+- Ghi nhận tách biệt hoàn toàn hai quyết định: (1) Nghiệm thu sản phẩm bàn giao pilot, và (2) Quyết định đầu tư mở rộng / thu hẹp / báo giá lại / dừng dựa trên ngưỡng giá trị thực tế.
+Phụ thuộc: Task #51, Task #52.
+Branch gợi ý: docs/<ISSUE-KEY>-record-separate-g3-acceptance-and-expansion
+Acceptance Criteria:
+- [ ] Biên bản G3 ghi rõ hai quyết định tách biệt: Acceptance vs Expansion Investment.
+- [ ] Không tự động suy diễn mở rộng nếu hoàn vốn vượt ngưỡng giá trị thống nhất.","Highest","G3 DEL03 DEL05 VN06 Squad-A Squad-D Role-A1 Role-D1 Role-D2","governance-docs","Gate-G3-Pilot-Acceptance","2027-01-25","2027-01-25","6h","","48","57","51, 52","57"
+"54","Epic","","Gate G4 - Exit Testing and Final Handover","Cổng G4 (Handover - Tuần 12): Kiểm thử đốt cạn hạn mức & xuất dữ liệu mở (OPS 08), xác minh khôi phục & xóa dữ liệu đa lớp (OPS 07/SEC 05), chốt điều khoản vận hành & pháp lý cuối kỳ (DEL 06), đóng gói mã/cấu hình/mapping/fixtures/tài liệu bàn giao (DEL 04) và nghiệm thu Gate G4 kèm demo 9 tình huống mẫu (Phụ lục B).","Highest","G4 WP06 OPS07 OPS08 DEL04 DEL06","ops-handover","Gate-G4-Handover","2027-01-25","2027-01-29","","","","","46",""
+"55","Story","54","G4-S1 Verify exit portability and operating terms","Story G4-S1: Chứng minh khả năng thoát hệ thống ở định dạng mở không khóa công nghệ (OPS 08), khôi phục/xóa sạch dữ liệu có replay trạng thái rút/quyền và hoàn tất điều khoản vận hành/pháp lý cuối kỳ (DEL 06). Tham chiếu SRS: SRS-FR-08.1, SRS-FR-08.3, SRS-NFR-05..11.","Highest","G4 WP06 OPS07 OPS08 DEL06","ops-handover","Gate-G4-Handover","2027-01-25","2027-01-27","","","","56","48","56"
+"56","Story","54","G4-S2 Deliver handover pack and G4 signoff","Story G4-S2: Đóng gói và bàn giao đầy đủ mã được đặt hàng, schema/mapping, cấu hình, dữ liệu kiểm thử hợp pháp, hướng dẫn vận hành/khôi phục/thoát (DEL 04) và ký nghiệm thu Gate G4. Tham chiếu SRS: Mục 8.3 (DEL 04).","Highest","G4 DEL04","ops-handover","Gate-G4-Handover","2027-01-26","2027-01-29","","","","","55",""
+"57","Task","54","Run OPS08 quota cap and open export test","Gate: G4 | SRS: SRS-FR-08.1, SRS-FR-08.3 | RFP: WP06, OPS08
+Phụ trách: D2 (TestOps), B1 (Data Eng)
+Chi tiết công việc:
+- Viết & chạy test OPS 08: làm cạn giới hạn token, lần gọi và chi phí -> xác minh hệ thống hold/báo rõ không cắt ngắn âm thầm hay retry bổ sung.
+- Thực hiện xuất toàn bộ bản ghi được phép, phiên bản, tham chiếu gốc, mapping, critical fields và audit log ở định dạng mở (JSON/CSV/Markdown).
+- Kiểm chứng khả năng đọc độc lập bằng trình đọc trung lập bên ngoài hệ thống.
+Phụ thuộc: Task #43, Task #53.
+Branch gợi ý: test/<ISSUE-KEY>-run-ops08-quota-cap-and-open-export-test
+Acceptance Criteria:
+- [ ] Export mở đọc được đầy đủ không phụ thuộc mã độc quyền bằng công cụ trung lập.
+- [ ] Cạn quota/cap fail-closed rõ ràng không cắt cụt câu trả lời.","Highest","G4 WP06 OPS08 SRS-FR-08 Squad-D Squad-B Role-D2 Role-B1","qa-eval","Gate-G4-Handover","2027-01-25","2027-01-26","12h","","55","60","43, 53","60, 61"
+"58","Task","54","Verify backup restore and multi store delete","Gate: G4 | SRS: SRS-FR-08.3, SRS-NFR-05, SRS-NFR-11 | RFP: OPS07, SEC05, DEL04
+Phụ trách: C3 (SecOps), D2 (TestOps), B1 (Data Eng)
+Chi tiết công việc:
+- Chạy diễn tập khôi phục từ bản backup xoay vòng 35 ngày trong môi trường sạch (RTO 4h hỗ trợ / RPO 24h), kiểm tra replay bắt buộc trạng thái xóa, thu hồi và quyền hiện hành trước khi mở truy cập.
+- Kiểm thử xóa dữ liệu trên active DB, vector index, Redis cache, log, cấu hình nhà cung cấp và ghi nhận rõ giới hạn xóa vật lý trong backup/nhà cung cấp (Phụ lục C).
+Phụ thuộc: Task #43.
+Branch gợi ý: test/<ISSUE-KEY>-verify-backup-restore-and-multi-store-delete
+Acceptance Criteria:
+- [ ] Có bằng chứng kiểm thử restore & replay deletion/withdrawal/permission đạt RTO/RPO.
+- [ ] Phân biệt rõ chặn sử dụng tức thời với thời hạn xóa vật lý trên từng lớp lưu trữ.","Highest","G4 OPS07 SEC05 DEL04 SRS-FR-08 SRS-NFR-05 SRS-NFR-11 Squad-C Squad-D Squad-B Role-C3 Role-D2 Role-B1","security-infra","Gate-G4-Handover","2027-01-25","2027-01-27","12h","","55","59","43","59, 60, 61"
+"59","Task","54","Finalize DEL06 operating terms and legal close","Gate: G4 | SRS: SRS-NFR-04, SRS-NFR-09..11 | RFP: DEL06, SEC04, SEC07, OPS06
+Phụ trách: C3 (SecOps), A1 (PM/BA), D2 (Commercial)
+Chi tiết công việc:
+- Hoàn thiện tài liệu Điều khoản Vận hành DEL 06: giờ dịch vụ (08:00–17:00 VN ngày làm việc), cam kết availability 99.5% (loại trừ bảo trì kế hoạch), phản hồi/cô lập sự cố (ACK 2h / cô lập 4h / báo cáo dữ liệu 4h), phụ thuộc & địa điểm nhà cung cấp/subprocessor, bảo hành công việc, gia hạn và quyền bàn giao.
+- Đóng hồ sơ rà soát pháp lý cuối kỳ xác nhận trách nhiệm SongNhat đối với nội dung chính sách.
+Phụ thuộc: Task #40, Task #41, Task #58.
+Branch gợi ý: docs/<ISSUE-KEY>-finalize-del06-operating-terms-and-legal-close
+Acceptance Criteria:
+- [ ] DEL 06 làm rõ phân bổ trách nhiệm hợp đồng (bao gồm tác động từ nhà cung cấp AI).
+- [ ] Privacy/Security & Legal Owner xác nhận đủ điều kiện bàn giao.","High","G4 DEL06 SEC04 SEC07 OPS06 SRS-NFR-04 SRS-NFR-09 Squad-C Squad-A Squad-D Role-C3 Role-A1 Role-D2","ops-handover","Gate-G4-Handover","2027-01-25","2027-01-28","10h","","55","60","40, 41, 58","60, 61"
+"60","Task","54","Package DEL04 code config fixtures and guides","Gate: G4 | SRS: Mục 8.3 | RFP: DEL04, WP06
+Phụ trách: D2 (Handover Eng), C2 (FE Eng), B3 (Retrieval Eng), A2 (Steward)
+Chi tiết công việc:
+- Đóng gói hoàn chỉnh sản phẩm DEL 04: mã nguồn được đặt hàng sạch đẹp (không secrets/dữ liệu cá nhân), schema/mapping, cấu hình, metadata/quyền, hướng dẫn triển khai & khôi phục, bộ test fixtures hợp pháp, hướng dẫn sử dụng Owner/Staff và Exit Playbook.
+- Rà soát đồng bộ toàn bộ /docs, README.md và release tag bàn giao.
+Phụ thuộc: Task #57, Task #58, Task #59.
+Branch gợi ý: docs/<ISSUE-KEY>-package-del04-code-config-fixtures-and-guides
+Acceptance Criteria:
+- [ ] Repo sạch (lint + test pass 100%), đủ tài liệu triển khai/khôi phục/thoát và bộ test fixtures hợp pháp.
+- [ ] Liệt kê rõ các giới hạn còn tồn tại và vấn đề mở (nếu có).","Highest","G4 DEL04 WP06 Squad-D Squad-C Squad-B Squad-A Role-D2 Role-C2 Role-B3 Role-A2","ops-handover","Gate-G4-Handover","2027-01-26","2027-01-28","16h","","56","61","57, 58, 59","61"
+"61","Task","54","Execute G4 signoff and 9 case demo","Gate: G4 | SRS: Mục 5.6.3, Mục 8.3 | RFP: DEL04, DEL06, Mục 13, Phụ lục B
+Phụ trách: Toàn đội 10 người (Chủ trì: A1, D1)
+Chi tiết công việc:
+- Chuẩn bị kịch bản và trình diễn đủ 9 tình huống mẫu bắt buộc (Phụ lục B RFP): câu hỏi CRM chung, ngoại lệ thương mại, giao dịch theo ngày, chính sách tương lai, hợp đồng mâu thuẫn, ghi chú CRM cũ, thiếu chú thích, chỉnh sửa dữ liệu, thu hồi giữa lúc trả lời (kèm người dùng không có quyền).
+- Ký biên bản nghiệm thu bàn giao cuối kỳ Gate G4.
+Phụ thuộc: Task #57, Task #58, Task #59, Task #60.
+Branch gợi ý: docs/<ISSUE-KEY>-execute-g4-signoff-and-9-case-demo
+Acceptance Criteria:
+- [ ] Trình diễn thành công 100% 9 Worked Cases + ca từ chối người dùng không có quyền.
+- [ ] Sponsor / Service Owner ký nghiệm thu chính thức Gate G4.","Highest","G4 DEL04 DEL06 Squad-A Squad-B Squad-C Squad-D Role-A1 Role-D1","governance-docs","Gate-G4-Handover","2027-01-28","2027-01-29","8h","","56","","57, 58, 59, 60",""

@@ -67,15 +67,10 @@
 | Nặng | Bỏ nhiệm vụ, báo cáo sai, tái phạm nhiều lần | Nhóm xem xét mức phạt đã thống nhất |
 | Nghiêm trọng | Cố tình phá hoại, xúc phạm nghiêm trọng, làm lộ thông tin | Họp nhóm xác minh và quyết định biện pháp xử lý |
 
-### Cơ chế “sẹo”
-| Mức độ | Số sẹo đề xuất |
-|---|---:|
-| Nhẹ | 1 |
-| Trung bình | 2 |
-| Nặng | 3 |
-| Nghiêm trọng | 4 trở lên |
-
-**Lưu ý:** Đây là mức đề xuất để nhóm thảo luận. Điểm quy đổi và mức trừ cụ thể (nếu có) phải được cả nhóm thống nhất trước khi áp dụng. Không tự động quy đổi thành phần trăm hoặc trừ điểm cá nhân khi chưa có xác nhận rõ ràng. Quy định chính thức cần ghi rõ tỷ lệ, cách cộng dồn, giới hạn, ngoại lệ và ngày hiệu lực.
+### Cơ chế “sẹo” (Quy định chính thức — Leader Tiến phê duyệt)
+- **1 sẹo:** Trừ **2%** điểm đánh giá chung / kết quả thành viên.
+- **5 sẹo:** Trừ **20%** điểm đánh giá chung / xem xét kỷ luật nhóm và báo cáo người phụ trách.
+- Cơ chế sẹo áp dụng trực tiếp cho các vi phạm R01 đến R10 (tùy mức độ nhẹ, trung bình, nặng, nghiêm trọng). Mọi thành viên có trách nhiệm khắc phục ngay sau khi bị ghi nhận sẹo.
 
 ### Quy trình xử lý
 1. Ghi nhận thời gian, nội dung, người liên quan và bằng chứng.

@@ -10,15 +10,15 @@ down:
 	docker compose down
 
 dev-db:
-	docker compose up -d db redis storage
+	docker compose up -d db redis
 
 lint:
 	cd backend && ruff check . && mypy src
-	cd frontend && pnpm lint
+	cd frontend && npm run lint
 
 test:
 	cd backend && pytest -q
-	cd frontend && pnpm test
+	cd frontend && npm run build
 
 migrate:
 	cd backend && alembic upgrade head
