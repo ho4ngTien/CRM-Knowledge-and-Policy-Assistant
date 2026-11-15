@@ -339,4 +339,4 @@ Các ca tối thiểu khi kiểm tra thay đổi có liên quan: luồng hợp l
 - [ ] Đã chỉ rõ việc tồn đọng, owner và quyết định cần tiếp theo.
 - [ ] Đã thông báo người liên quan và cập nhật trạng thái task.
 
-> Tham chiếu phối hợp dự án: [rules.md](./rules.md), [jira-playbook.md](./jira-playbook.md), [git-playbook.md](./git-playbook.md). Yêu cầu nguồn: *SongNhat CRM Knowledge and Policy Assistant RFP*, gồm các điều khoản và phụ lục liên quan.
+> Tham chiếu phối hợp dự án: [srs.md](../specs/srs.md), [roadmap.md](../specs/roadmap.md), [compliance-matrix.md](../specs/compliance-matrix.md), [rules.md](./rules.md), [jira-playbook.md](./jira-playbook.md), [git-playbook.md](./git-playbook.md). Yêu cầu nguồn: *SongNhat CRM Knowledge and Policy Assistant RFP*, gồm các điều khoản và phụ lục liên quan.

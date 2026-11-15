@@ -1,4 +1,4 @@
-# dev.ps1 — Thay thế Makefile trên Windows
+﻿# dev.ps1 — Thay thế Makefile trên Windows
 # Dùng: .\dev.ps1 <target>
 param([string]$Target = "help")
 
@@ -6,14 +6,7 @@ $Root = $PSScriptRoot
 
 function Invoke-DevDB {
     Write-Host "Starting dev databases (PostgreSQL+pgvector, Redis)..." -ForegroundColor Cyan
-    Write-Host "  Note: MinIO (storage) is a separate profile. Run '.\dev.ps1 dev-storage' when needed." -ForegroundColor DarkGray
     docker compose up -d db redis
-}
-
-function Invoke-DevStorage {
-    Write-Host "Starting object storage (MinIO)..." -ForegroundColor Cyan
-    Write-Host "  Requires Docker Hub access. If blocked, skip for Phase 1-2." -ForegroundColor Yellow
-    docker compose --profile storage up -d storage
 }
 
 function Invoke-Up {
@@ -65,7 +58,6 @@ function Invoke-Help {
     Write-Host "Targets:"
     Write-Host "  dev-db      Start PostgreSQL+pgvector, Redis"
     Write-Host "  dev         Start FastAPI backend dev server (uvicorn --reload)"
-    Write-Host "  dev-storage Start MinIO storage (Phase 3+)"
     Write-Host "  up          Start all containerized services"
     Write-Host "  down        Stop all services"
     Write-Host "  logs        Tail logs"
@@ -77,7 +69,6 @@ function Invoke-Help {
 
 switch ($Target) {
     "dev-db"      { Invoke-DevDB }
-    "dev-storage" { Invoke-DevStorage }
     "dev"         { Invoke-Dev }
     "start"       { Invoke-Dev }
     "up"          { Invoke-Up }

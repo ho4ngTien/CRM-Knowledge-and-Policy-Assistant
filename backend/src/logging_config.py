@@ -1,5 +1,7 @@
 import logging
+
 import structlog
+
 from src.config import settings
 
 

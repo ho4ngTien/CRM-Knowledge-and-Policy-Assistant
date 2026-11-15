@@ -1,6 +1,7 @@
 # JIRA PLAYBOOK — HƯỚNG DẪN SỬ DỤNG JIRA
 
 > Hướng dẫn cấu trúc công việc, tạo issue, viết mô tả, cập nhật trạng thái và trình bày thông tin trên Jira.
+> File CSV chuẩn import theo **5 Release Gates (`G0–G4`)** dựa trên [SRS](../specs/srs.md): [docs/work-packages/05-jira-5gates-import.csv](../work-packages/05-jira-5gates-import.csv).
 
 ## 1. Jira dùng để làm gì
 Jira là nơi ghi nhận và theo dõi công việc. Mỗi issue cần làm rõ: cần làm gì, vì sao, kết quả mong đợi, ai phụ trách, thời hạn và điều kiện hoàn thành.
@@ -28,9 +29,9 @@ Jira là nơi ghi nhận và theo dõi công việc. Mỗi issue cần làm rõ:
 - **Links/Attachments:** tài liệu và issue liên quan.
 
 ## 4. Quy tắc viết Summary
-Bắt đầu bằng động từ/kết quả, nêu rõ đối tượng, ngắn gọn. Tránh tiêu đề chung chung.
+Bắt đầu bằng động từ/kết quả, nêu rõ đối tượng, ngắn gọn (`4–7` từ tiếng Anh không dấu) để chuyển trực tiếp thành tên nhánh Git (`<type>/<ISSUE-KEY>-<slug>`). Tránh tiêu đề chung chung hoặc quá dài có dấu tiếng Việt.
 
-**Tốt:** `Display source citation in answer panel`; `Fix incorrect page number in citation`.
+**Tốt:** `Display source citation in answer panel`; `Build passages CSV validator and quarantine`.
 
 **Không tốt:** `Update`; `Fix bug`; `Do task`; `Work on chatbot`.
 

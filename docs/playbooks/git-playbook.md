@@ -61,7 +61,7 @@ Kiểm tra staging để tránh commit nhầm file.
 ## 4. Commit message
 Format đề xuất:
 ```text
-<type>(<scope>): <short-description> [<JIRA-KEY>]
+[<JIRA-KEY>] <type>(<scope>): <short-description> 
 ```
 Ví dụ:
 ```text

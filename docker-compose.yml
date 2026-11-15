@@ -3,7 +3,6 @@
 #
 # Profiles:
 #   (default) db, redis         — Phase 1-2: Foundation & Retrieval
-#   --profile storage           — Phase 3+: khi cần object storage (MinIO)
 #   --profile app               — Full stack: backend + frontend + nginx + worker
 
 services:
@@ -36,22 +35,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # ── Object Storage (chỉ dùng khi --profile storage) ───────────────────────
-  # Nếu Docker Hub/Quay bị block: đặt MINIO_SKIP=true trong .env và dùng local filesystem.
-  storage:
-    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
-    profiles: [storage]
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - miniodata:/data
 
   # ── Application services (chỉ dùng khi --profile app) ────────────────────
   backend:
@@ -115,4 +98,3 @@ services:
 
 volumes:
   pgdata:
-  miniodata:
