@@ -194,7 +194,7 @@ Các tham số giới hạn mô hình LLM được chốt đồng bộ giữa ba
 | **Max Calls per Package** | `2` | `LLM_MAX_CALLS_PER_PACKAGE = 2` | `MAX_LLM_CALLS_PER_PACKAGE = 2` | Tối đa 1 call chính + 1 call regenerate |
 | **Max Calls per Month** | `2000` | `LLM_MAX_CALLS_PER_MONTH = 2000` | `LLM_MAX_CALLS_PER_MONTH = 2000` | Hạn mức chi phí hàng tháng (OPS 06) |
 | **Streaming Output** | `false` | `ENABLE_ANSWER_STREAMING = False` | `ENABLE_ANSWER_STREAMING = False` | Cấm stream trực tiếp; phải kiểm chứng xong mới hiển thị |
-| **O1 Reasoning Model** | `Loại trừ` | Đã loại trừ khỏi codebase | Đã loại trừ khỏi codebase | Loại trừ hoàn toàn khỏi Base Scope theo SRS §2.3 |
+| **Option O1 (Selected CRM Context)** | `false` (Loại trừ) | Đã loại trừ khỏi codebase | Đã loại trừ khỏi codebase | Tùy chọn O1 (DAT 07) cắt hoàn toàn khỏi Base Scope theo SRS §1.4 & §2.3 |
 | **Timezone mặc định** | `Asia/Ho_Chi_Minh` | `APP_TIMEZONE = "Asia/Ho_Chi_Minh"` | `Asia/Ho_Chi_Minh` | Múi giờ chuẩn xác định ngày hiệu lực |
 
 ---

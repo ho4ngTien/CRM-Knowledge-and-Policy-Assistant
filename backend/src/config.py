@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # LLM Model: gpt-4o (O1 reasoning model is strictly excluded from Base Scope per SRS §2.3)
+    # LLM Model: gpt-4o (Option O1 - Selected CRM Context is strictly excluded from Base Scope per SRS §1.4 & §2.3)
     LLM_PROVIDER: str = "openai"
     LLM_API_KEY: str = ""
     LLM_MODEL: str = "gpt-4o"

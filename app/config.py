@@ -15,7 +15,7 @@ MAX_INPUT_TOKENS: int = 6000
 MAX_OUTPUT_TOKENS: int = 900
 LLM_MAX_CALLS_PER_MONTH: int = 2000
 ENABLE_ANSWER_STREAMING: bool = False
-# O1 (Reasoning model) loại trừ khỏi Base Scope theo SRS §2.3; Base Scope dùng gpt-4o với streaming=false.
+# O1 (Selected CRM Context - DAT 07) loại trừ khỏi Base Scope theo SRS §1.4 & §2.3; Base Scope dùng O1=false và streaming=false.
 
 # 2. Giới hạn độ dài nội dung giải thích ngắn (Quy định bổ sung Giai đoạn 1)
 EXPLANATION_MIN_WORDS: int = 100
