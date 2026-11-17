@@ -20,7 +20,12 @@ async def validate_csv_batch(
     expected_rows: int | None = Query(default=None, ge=0),
     file: UploadFile = File(...),
     current_user: AuthenticatedUser = Depends(
-        require_roles(UserRole.STEWARD, UserRole.POLICY_OWNER, UserRole.ADMINISTRATOR)
+        require_roles(
+            UserRole.STEWARD,
+            UserRole.POLICY_OWNER,
+            UserRole.PUBLISHER,
+            UserRole.ADMINISTRATOR,
+        )
     ),
 ) -> CsvValidationReport:
     """Dry-run validate a UTF-8 passages or critical_fields CSV batch with DAT 08 quarantine."""
@@ -39,7 +44,12 @@ async def list_quarantined_rows(
     unresolved_only: bool = Query(default=True),
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(
-        require_roles(UserRole.STEWARD, UserRole.POLICY_OWNER, UserRole.ADMINISTRATOR)
+        require_roles(
+            UserRole.STEWARD,
+            UserRole.POLICY_OWNER,
+            UserRole.PUBLISHER,
+            UserRole.ADMINISTRATOR,
+        )
     ),
 ) -> list[QuarantineItemResponse]:
     """Inspect quarantined rows awaiting steward correction."""

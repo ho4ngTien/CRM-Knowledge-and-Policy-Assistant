@@ -46,6 +46,7 @@ async def update_local_referral(
     current_user: AuthenticatedUser = Depends(
         require_roles(
             UserRole.POLICY_OWNER,
+            UserRole.PUBLISHER,
             UserRole.REFERRAL_HANDLER,
             UserRole.STEWARD,
             UserRole.ADMINISTRATOR,

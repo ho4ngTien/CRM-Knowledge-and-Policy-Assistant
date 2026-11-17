@@ -96,13 +96,25 @@ def test_rfp_common_bid_basis_and_scope_flags() -> None:
 
 
 def test_enum_completeness() -> None:
-    """Verify exact enum sets for KNW 07 (5 reasons), KNW 03 (7+2 states), and 5 Gates."""
+    """Verify exact enum sets for KNW 07 (5 reasons), KNW 03 (7+2 states), 5 Gates, and 8 RFP roles."""
     assert len(FeedbackReason) == 5
     assert len(PolicyLifecycleStatus) == 9
     assert {g.value for g in ReleaseGate} == {"G0", "G1", "G2", "G3", "G4"}
     assert len(EvalPartition) == 4
     assert len(AuthorityTier) == 5
-    assert len(UserRole) == 7
+    assert len(UserRole) == 9
+    # Mandated 8 RFP/SRS roles (SEC 01 & SRS-FR-02.1)
+    rfp_roles = {
+        UserRole.READER,
+        UserRole.POLICY_OWNER,
+        UserRole.PUBLISHER,
+        UserRole.STEWARD,
+        UserRole.ADMINISTRATOR,
+        UserRole.INDEPENDENT_EVALUATOR,
+        UserRole.PRIVACY_SECURITY_OWNER,
+        UserRole.LEGAL_OWNER,
+    }
+    assert rfp_roles.issubset(set(UserRole))
 
 
 def test_csv_templates_and_quarantine_validators() -> None:

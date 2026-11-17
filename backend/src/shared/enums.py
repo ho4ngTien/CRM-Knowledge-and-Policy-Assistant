@@ -9,9 +9,11 @@ class UserRole(StrEnum):
     READER = "reader"
     STEWARD = "steward"
     POLICY_OWNER = "policy_owner"
+    PUBLISHER = "publisher"
     REFERRAL_HANDLER = "referral_handler"
     ADMINISTRATOR = "administrator"
     PRIVACY_SECURITY_OWNER = "privacy_security_owner"
+    LEGAL_OWNER = "legal_owner"
     INDEPENDENT_EVALUATOR = "independent_evaluator"
 
 

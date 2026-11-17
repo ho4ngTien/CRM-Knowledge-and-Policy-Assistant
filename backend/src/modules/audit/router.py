@@ -22,10 +22,14 @@ async def get_restricted_audit_logs(
     limit: int = Query(default=100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(
-        require_roles(UserRole.PRIVACY_SECURITY_OWNER, UserRole.ADMINISTRATOR)
+        require_roles(
+            UserRole.PRIVACY_SECURITY_OWNER,
+            UserRole.LEGAL_OWNER,
+            UserRole.ADMINISTRATOR,
+        )
     ),
 ) -> list[AuditLogResponse]:
-    """Read access-restricted audit trail (privacy_security_owner / administrator only)."""
+    """Read access-restricted audit trail (privacy_security_owner / legal_owner / administrator only)."""
     _ = current_user
     return await service.list_audit_logs(db, limit=limit)
 
@@ -35,7 +39,11 @@ async def get_monthly_cost_meter(
     month_key: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(
-        require_roles(UserRole.ADMINISTRATOR, UserRole.POLICY_OWNER)
+        require_roles(
+            UserRole.ADMINISTRATOR,
+            UserRole.POLICY_OWNER,
+            UserRole.PUBLISHER,
+        )
     ),
 ) -> CostMeterSummaryResponse:
     """Inspect monthly LLM calls, tokens, packages, holds, and errors (OPS 06)."""
@@ -46,7 +54,12 @@ async def get_monthly_cost_meter(
 @router.get("/export-open", response_model=OpenExportResponse)
 async def export_open_handover_manifest(
     current_user: AuthenticatedUser = Depends(
-        require_roles(UserRole.ADMINISTRATOR, UserRole.POLICY_OWNER, UserRole.STEWARD)
+        require_roles(
+            UserRole.ADMINISTRATOR,
+            UserRole.POLICY_OWNER,
+            UserRole.PUBLISHER,
+            UserRole.STEWARD,
+        )
     ),
 ) -> OpenExportResponse:
     """Export open non-proprietary dataset metadata supporting exit without lock-in (OPS 08)."""

@@ -28,7 +28,12 @@ async def list_feedback_candidates(
     reason: FeedbackReason | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(
-        require_roles(UserRole.STEWARD, UserRole.POLICY_OWNER, UserRole.ADMINISTRATOR)
+        require_roles(
+            UserRole.STEWARD,
+            UserRole.POLICY_OWNER,
+            UserRole.PUBLISHER,
+            UserRole.ADMINISTRATOR,
+        )
     ),
 ) -> list[FeedbackCandidateResponse]:
     """List feedback candidates awaiting steward curation."""

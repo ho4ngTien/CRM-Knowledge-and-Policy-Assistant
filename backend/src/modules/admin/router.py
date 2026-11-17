@@ -26,7 +26,12 @@ async def transition_policy_lifecycle(
     payload: LifecycleTransitionRequest,
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(
-        require_roles(UserRole.STEWARD, UserRole.POLICY_OWNER, UserRole.ADMINISTRATOR)
+        require_roles(
+            UserRole.STEWARD,
+            UserRole.POLICY_OWNER,
+            UserRole.PUBLISHER,
+            UserRole.ADMINISTRATOR,
+        )
     ),
 ) -> LifecycleTransitionResponse:
     """Execute an auditable KNW 03 lifecycle state transition."""
@@ -41,7 +46,7 @@ async def withdraw_policy_immediately(
     payload: InstantWithdrawalRequest,
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(
-        require_roles(UserRole.POLICY_OWNER, UserRole.ADMINISTRATOR)
+        require_roles(UserRole.POLICY_OWNER, UserRole.PUBLISHER, UserRole.ADMINISTRATOR)
     ),
 ) -> InstantWithdrawalResponse:
     """Immediately withdraw a policy, block live retrieval, and purge caches within <= 5m."""
@@ -66,7 +71,12 @@ async def toggle_emergency_disable(
 @router.get("/ops-summary", response_model=AdminOpsSummaryResponse)
 async def get_admin_ops_summary(
     current_user: AuthenticatedUser = Depends(
-        require_roles(UserRole.STEWARD, UserRole.POLICY_OWNER, UserRole.ADMINISTRATOR)
+        require_roles(
+            UserRole.STEWARD,
+            UserRole.POLICY_OWNER,
+            UserRole.PUBLISHER,
+            UserRole.ADMINISTRATOR,
+        )
     ),
 ) -> AdminOpsSummaryResponse:
     """Inspect active RFP/SRS Base Scope limits and runtime flags."""
