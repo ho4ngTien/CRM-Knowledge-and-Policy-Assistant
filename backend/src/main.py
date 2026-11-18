@@ -1,4 +1,8 @@
-"""FastAPI application entrypoint mounting all 12 SRS modules & fail-closed handlers."""
+"""FastAPI application entrypoint mounting all 12 SRS modules & fail-closed handlers [CKPA-17].
+
+Gate: G1 | SRS: Mục 4.3, Mục 7.2, SRS-FR-06.1 | RFP: ANS03, ANS04, DEL02
+Responsible: C1 (Phạm Lương Yến Nhi — Lead LLM Eng), B2 (Hữu Tài — Policy Eng), B3 (Phạm Quý Hải — Retrieval Eng)
+"""
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware

@@ -237,3 +237,73 @@ def test_policy_applicability_conflict_hold_and_chinese_wall() -> None:
         fabrication_on_unanswerable_rate=0.02,
     )
     assert len(ev_svc.check_section8_thresholds(run_req)) == 1
+
+
+def test_ckpa_17_answer_package_seven_parts_and_strict_schema() -> None:
+    """[CKPA-17] Verify AnswerPackage 7 parts and strict Pydantic v2 validation (fail-closed)."""
+    from datetime import date
+    from pydantic import ValidationError
+    from src.modules.policy.schemas import CriticalFieldItem
+    from src.shared.enums import CriticalFieldType
+
+    valid_payload = {
+        "answer_id": "ANS-TEST-001",
+        "task_id": "TSK-001",
+        "status": AnswerStatus.ANSWERED,
+        # Part 1
+        "original_question": "Thời hạn bảo hành đổi trả tiêu chuẩn là bao nhiêu ngày?",
+        # Part 2
+        "governing_date": date(2026, 11, 18),
+        "timezone": "Asia/Ho_Chi_Minh",
+        "scope": "company:SN;branch:all;role:all;customer_group:all;product:all",
+        "is_historical": False,
+        "is_future_preview": False,
+        # Part 3
+        "guidance_text": "Thời hạn đổi trả tiêu chuẩn là 30 ngày kể từ ngày mua hàng.",
+        "verbatim_quotes": ["Đổi trả trong vòng 30 ngày đối với lỗi từ nhà sản xuất."],
+        # Part 4
+        "citations": [],
+        # Part 5
+        "critical_fields": [
+            {
+                "field_id": "CF-001",
+                "policy_id": "POL-WAR-01",
+                "policy_version_id": "PVER-01",
+                "document_version_id": "DVER-01",
+                "field_name": "thoi_han_doi_tra",
+                "field_type": CriticalFieldType.NUMBER,
+                "operator": ComparisonOperator.LE,
+                "value": "30",
+                "unit": "ngày",
+                "approval_role": "steward",
+                "source_clause": "Điều 4.1",
+                "status": PolicyLifecycleStatus.EFFECTIVE,
+            }
+        ],
+        # Part 6
+        "missing_facts": [],
+        "hold_reason": None,
+        "uncertainty_note": None,
+        # Part 7
+        "referral_target": None,
+        "internal_use_warning": "Lưu hành nội bộ - Không chia sẻ ra ngoài",
+    }
+
+    # Pass contract validation
+    pkg = AnswerPackage.model_validate(valid_payload)
+    assert pkg.answer_id == "ANS-TEST-001"
+    assert len(pkg.critical_fields) == 1
+    assert pkg.critical_fields[0].field_name == "thoi_han_doi_tra"
+
+    # Strict schema: reject extra fields (e.g. Option O1 or unapproved parameters)
+    forbidden_payload = valid_payload.copy()
+    forbidden_payload["selected_o1_context"] = "illegal_context"
+    with pytest.raises(ValidationError):
+        AnswerPackage.model_validate(forbidden_payload)
+
+    # CriticalFieldItem strict schema: reject extra fields
+    invalid_cf = valid_payload["critical_fields"][0].copy()
+    invalid_cf["unknown_attribute"] = "malformed"
+    with pytest.raises(ValidationError):
+        CriticalFieldItem.model_validate(invalid_cf)
+

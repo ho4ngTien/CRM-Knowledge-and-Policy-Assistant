@@ -1,8 +1,8 @@
-"""Pydantic schemas for the mandatory 7-part AnswerPackage (ANS 01, ANS 03, SRS-FR-06.1)."""
+"""Pydantic schemas for the mandatory 7-part AnswerPackage (ANS 01, ANS 03, SRS-FR-06.1) [CKPA-17]."""
 
 from datetime import date
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.modules.policy.schemas import CriticalFieldItem
 from src.shared.enums import AnswerStatus
@@ -10,6 +10,8 @@ from src.shared.enums import AnswerStatus
 
 class AnswerCitation(BaseModel):
     """Verified clickable citation anchored to a curated document passage."""
+
+    model_config = ConfigDict(extra="forbid")
 
     document_id: str
     document_version_id: str
@@ -24,6 +26,8 @@ class AnswerCitation(BaseModel):
 class AnswerQueryRequest(BaseModel):
     """Staff policy query with optional VN governing date & Base Scope filters."""
 
+    model_config = ConfigDict(extra="forbid")
+
     question: str = Field(..., min_length=2, max_length=2000)
     task_id: str | None = Field(default=None, max_length=64)
     governing_date: date | None = None
@@ -32,7 +36,12 @@ class AnswerQueryRequest(BaseModel):
 
 
 class AnswerPackage(BaseModel):
-    """Complete 7-part verified response returned only AFTER post-generation validation."""
+    """Complete 7-part verified response returned only AFTER post-generation validation.
+
+    Strictly frozen under Gate G1, SRS Mục 4.3, 7.2, SRS-FR-06.1 | RFP: ANS03, ANS04, DEL02 [CKPA-17].
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     answer_id: str
     task_id: str
