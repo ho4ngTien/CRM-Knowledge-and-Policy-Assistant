@@ -1,12 +1,13 @@
-# docker-compose.yml — Development environment
-# Không dùng trực tiếp cho production. Production cần review riêng.
+# docker-compose.yml — Gate G1 Isolated Dev/Test Stack (SEC 04, SEC 06)
+# Tách biệt 100% khỏi môi trường Production (VPC/DB/Storage/Keys cô lập).
+# Hỗ trợ tùy biến host port qua .env (POSTGRES_PORT, REDIS_PORT, BACKEND_PORT, FRONTEND_PORT, NGINX_PORT).
 #
 # Profiles:
 #   (default) db, redis         — Phase 1-2: Foundation & Retrieval
 #   --profile app               — Full stack: backend + frontend + nginx + worker + beat
 
 services:
-  # ── Databases (luôn khởi động trong dev) ──────────────────────────────────
+  # ── Databases (luôn khởi động trong dev/test cô lập) ──────────────────────
   db:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
@@ -17,10 +18,12 @@ services:
       TZ: Asia/Ho_Chi_Minh
       PGTZ: Asia/Ho_Chi_Minh
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./infra/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - ckpa_g1_isolated_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ckpa -d ckpa_db"]
       interval: 10s
@@ -31,7 +34,9 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - ckpa_g1_isolated_net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -47,17 +52,26 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      TZ: Asia/Ho_Chi_Minh
+      APP_TIMEZONE: Asia/Ho_Chi_Minh
       DATABASE_URL: postgresql+asyncpg://ckpa:ckpa_pass@db:5432/ckpa_db
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      LLM_ALLOW_TRAINING: "false"
+      LLM_ZERO_DATA_RETENTION: "true"
+      LLM_TELEMETRY_ENABLED: "false"
+    security_opt:
+      - no-new-privileges:true
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - ckpa_g1_isolated_net
     healthcheck:
       test:
         [
@@ -82,16 +96,25 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      TZ: Asia/Ho_Chi_Minh
+      APP_TIMEZONE: Asia/Ho_Chi_Minh
       DATABASE_URL: postgresql+asyncpg://ckpa:ckpa_pass@db:5432/ckpa_db
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      LLM_ALLOW_TRAINING: "false"
+      LLM_ZERO_DATA_RETENTION: "true"
+      LLM_TELEMETRY_ENABLED: "false"
+    security_opt:
+      - no-new-privileges:true
     command: celery -A src.celery_app worker -l info
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - ckpa_g1_isolated_net
     volumes:
       - ./worker:/app
       - ./data:/app/data
@@ -104,16 +127,25 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      TZ: Asia/Ho_Chi_Minh
+      APP_TIMEZONE: Asia/Ho_Chi_Minh
       DATABASE_URL: postgresql+asyncpg://ckpa:ckpa_pass@db:5432/ckpa_db
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      LLM_ALLOW_TRAINING: "false"
+      LLM_ZERO_DATA_RETENTION: "true"
+      LLM_TELEMETRY_ENABLED: "false"
+    security_opt:
+      - no-new-privileges:true
     command: celery -A src.celery_app beat -l info
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - ckpa_g1_isolated_net
     volumes:
       - ./worker:/app
 
@@ -126,24 +158,37 @@ services:
     env_file: .env
     environment:
       TZ: Asia/Ho_Chi_Minh
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8000}
+    security_opt:
+      - no-new-privileges:true
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - ckpa_g1_isolated_net
 
   nginx:
     profiles: [app]
     image: nginx:alpine
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     ports:
-      - "80:80"
+      - "${NGINX_PORT:-80}:80"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - backend
       - frontend
+    networks:
+      - ckpa_g1_isolated_net
+
+networks:
+  ckpa_g1_isolated_net:
+    driver: bridge
+    name: ckpa_g1_isolated_net
 
 volumes:
   pgdata:

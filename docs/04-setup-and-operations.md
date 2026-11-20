@@ -40,6 +40,16 @@ docker compose --profile app logs -f
 docker compose --profile app down            # hoặc .\dev.ps1 down / make down
 ```
 
+### 1.4 Cô lập Môi trường Kiểm thử G1 (`SEC 04`, `SEC 06`) & Cấu hình IAM 4 Vai trò (`20 Named Users` — `SEC 01`, `SEC 08`)
+- **Tách biệt `100%` Dev/Test khỏi Production (`SEC 06`):**
+  - Môi trường kiểm thử G1 chạy trên mạng bridge cô lập `ckpa_g1_isolated_net` với `security_opt: no-new-privileges:true`, cho phép tùy biến cổng máy trạm qua `.env` (`POSTGRES_PORT`, `REDIS_PORT`, `BACKEND_PORT`, `FRONTEND_PORT`, `NGINX_PORT`).
+  - Phương thức `settings.verify_sec06_test_prod_isolation()` trong [backend/src/config.py](../backend/src/config.py) cưỡng chế chặn hai chiều: cấm môi trường `development`/`test` kết nối tới danh sách máy chủ DB Production (`PROD_DATABASE_HOST_DENYLIST`), cấm môi trường `production` dùng khóa mặc định hoặc DB của `dev`/`test`, và gắn nhãn `env` vào mọi JWT token để chặn dùng chéo token giữa `Test` và `Prod`.
+- **Khóa cứng Model Training & Telemetry (`SEC 04`):**
+  - Các cờ `LLM_ALLOW_TRAINING=false`, `LLM_ZERO_DATA_RETENTION=true`, `LLM_TELEMETRY_ENABLED=false` được khóa ở cả tầng cấu hình ứng dụng và biến môi trường container.
+- **IAM 4 Vai trò Hệ thống chuẩn Mục 2 RFP trên `20 Named Users / 5 Concurrent Sessions` (`SEC 01`, `SEC 08`):**
+  - Danh bạ `G1_NAMED_USERS_DIRECTORY` trong [backend/src/shared/auth.py](../backend/src/shared/auth.py) định danh đúng `20` người dùng được cấp phép (`PILOT_MAX_NAMED_USERS=20`), giới hạn tối đa `5` phiên đồng thời (`PILOT_MAX_CONCURRENT_SESSIONS=5`) trên `4` vai trò hệ thống chuẩn (`reader`, `policy_owner`, `steward`, `administrator` — kèm kiểm tra kết hợp vai trò tương thích được `P5` duyệt và tách biệt độc lập `S4` theo Mục 11 RFP).
+  - Mọi thao tác cấp phát JWT (`/api/v1/identity/token`), kiểm tra quyền (`/api/v1/identity/check-permission`) và thẩm định trạng thái cô lập hạ tầng (`/api/v1/identity/iam-status`) đều ghi nhận nhật ký kiểm toán `SEC 08`.
+
 ---
 
 ## 2. Tác vụ Lịch (Celery Beat) & Dọn Cache Thu hồi (`<= 300s`)
