@@ -1,8 +1,9 @@
 """Authentication & RBAC dependency scaffolding (SEC 01, SRS-FR-02)."""
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
 import re
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass, field
+from typing import Any
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -34,7 +35,9 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> Authenticated
     )
 
 
-def require_roles(*allowed_roles: UserRole) -> Callable[..., AuthenticatedUser]:
+def require_roles(
+    *allowed_roles: UserRole,
+) -> Callable[..., Coroutine[Any, Any, AuthenticatedUser]]:
     """Dependency factory enforcing least-privilege endpoint access (SEC 01)."""
     allowed = frozenset(allowed_roles)
 
