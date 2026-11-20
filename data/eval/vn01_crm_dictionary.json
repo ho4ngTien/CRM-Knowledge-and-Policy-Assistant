@@ -1,0 +1,360 @@
+{
+  "metadata": {
+    "title": "Từ điển Viết tắt CRM và Chuẩn hóa Truy vấn Tiếng Việt (VN 01 Profile)",
+    "version": "1.0",
+    "gate": "G1",
+    "subtask_id": "CKPA-55 (CRM-G1-SUB08)",
+    "lead_p4": "Ngô Thị Trà My (Staff users)",
+    "collaborators": [
+      "P5 Anh Khoa (Privacy and Security Owners)",
+      "S3 Yến Nhi (Retrieval and Application Engineer)"
+    ],
+    "target_consumer": "S3 (Retrieval and Application Engineer)",
+    "rfp_requirements": [
+      "ANS 02",
+      "VN 01",
+      "SEC 02",
+      "SEC 06"
+    ]
+  },
+  "abbreviations": {
+    "kh": [
+      "khách hàng",
+      "customer",
+      "người mua",
+      "đối tác"
+    ],
+    "khtt": [
+      "khách hàng thân thiết",
+      "loyal customer",
+      "vip customer"
+    ],
+    "b2b": [
+      "doanh nghiệp với doanh nghiệp",
+      "khách hàng doanh nghiệp",
+      "corporate customer"
+    ],
+    "b2c": [
+      "doanh nghiệp với người tiêu dùng",
+      "khách hàng cá nhân",
+      "retail customer"
+    ],
+    "bg": [
+      "báo giá",
+      "bảng báo giá",
+      "quotation",
+      "quote"
+    ],
+    "qbg": [
+      "quy trình báo giá",
+      "quy định báo giá",
+      "quotation procedure"
+    ],
+    "ck": [
+      "chiết khấu",
+      "giảm giá",
+      "tỷ lệ chiết khấu",
+      "discount",
+      "rebate"
+    ],
+    "hd": [
+      "hợp đồng",
+      "hợp đồng kinh tế",
+      "hợp đồng nguyên tắc",
+      "contract",
+      "agreement"
+    ],
+    "hđ": [
+      "hợp đồng",
+      "hợp đồng kinh tế",
+      "hợp đồng nguyên tắc",
+      "contract",
+      "agreement"
+    ],
+    "cskh": [
+      "chăm sóc khách hàng",
+      "dịch vụ khách hàng",
+      "customer service",
+      "customer support"
+    ],
+    "bh": [
+      "bảo hành",
+      "chính sách bảo hành",
+      "phiếu bảo hành",
+      "warranty"
+    ],
+    "bd": [
+      "bảo dưỡng",
+      "bảo trì định kỳ",
+      "maintenance"
+    ],
+    "bđ": [
+      "bảo dưỡng",
+      "bảo trì định kỳ",
+      "maintenance"
+    ],
+    "cvdv": [
+      "cố vấn dịch vụ",
+      "service advisor"
+    ],
+    "cvkd": [
+      "chuyên viên kinh doanh",
+      "nhân viên bán hàng",
+      "sales executive",
+      "sales rep"
+    ],
+    "tpkd": [
+      "trưởng phòng kinh doanh",
+      "sales manager"
+    ],
+    "gdkd": [
+      "giám đốc kinh doanh",
+      "sales director"
+    ],
+    "gđkd": [
+      "giám đốc kinh doanh",
+      "sales director"
+    ],
+    "gdcn": [
+      "giám đốc chi nhánh",
+      "branch manager",
+      "branch director"
+    ],
+    "gđcn": [
+      "giám đốc chi nhánh",
+      "branch manager",
+      "branch director"
+    ],
+    "tgd": [
+      "tổng giám đốc",
+      "general director",
+      "ceo"
+    ],
+    "tgđ": [
+      "tổng giám đốc",
+      "general director",
+      "ceo"
+    ],
+    "ktv": [
+      "kỹ thuật viên",
+      "thợ kỹ thuật",
+      "technician"
+    ],
+    "vat": [
+      "thuế giá trị gia tăng",
+      "thuế gtgt",
+      "value added tax"
+    ],
+    "gtgt": [
+      "giá trị gia tăng"
+    ],
+    "po": [
+      "đơn đặt hàng",
+      "lệnh đặt mua",
+      "purchase order"
+    ],
+    "bo": [
+      "đơn hàng chờ",
+      "hàng đặt trước chưa lưu kho",
+      "back order"
+    ],
+    "stock": [
+      "hàng tồn kho",
+      "hàng lưu kho sẵn có",
+      "available inventory"
+    ],
+    "scc": [
+      "sửa chữa chung",
+      "general repair"
+    ],
+    "ds": [
+      "đồng sơn",
+      "sơn và gò hàn",
+      "body and paint"
+    ],
+    "đs": [
+      "đồng sơn",
+      "sơn và gò hàn",
+      "body and paint"
+    ],
+    "mst": [
+      "mã số thuế",
+      "tax code"
+    ],
+    "cccd": [
+      "căn cước công dân",
+      "định danh cá nhân",
+      "citizen identity"
+    ],
+    "cmnd": [
+      "chứng minh nhân dân",
+      "identity card"
+    ],
+    "nd": [
+      "nghị định",
+      "decree"
+    ],
+    "nđ": [
+      "nghị định",
+      "decree"
+    ],
+    "tt": [
+      "thông tư",
+      "circular"
+    ],
+    "qd": [
+      "quyết định",
+      "decision"
+    ],
+    "qđ": [
+      "quyết định",
+      "decision"
+    ],
+    "sla": [
+      "cam kết thời gian giải quyết",
+      "cam kết dịch vụ",
+      "service level agreement"
+    ],
+    "sop": [
+      "quy trình chuẩn",
+      "quy trình vận hành tiêu chuẩn",
+      "standard operating procedure"
+    ],
+    "pii": [
+      "thông tin định danh cá nhân",
+      "dữ liệu cá nhân",
+      "personally identifiable information"
+    ]
+  },
+  "unaccent_mappings": {
+    "chiet khau": "chiết khấu",
+    "bao gia": "báo giá",
+    "hop dong": "hợp đồng",
+    "khach hang": "khách hàng",
+    "bao hanh": "bảo hành",
+    "bao duong": "bảo dưỡng",
+    "co van dich vu": "cố vấn dịch vụ",
+    "chuyen vien kinh doanh": "chuyên viên kinh doanh",
+    "truong phong kinh doanh": "trưởng phòng kinh doanh",
+    "giam doc kinh doanh": "giám đốc kinh doanh",
+    "giam doc chi nhanh": "giám đốc chi nhánh",
+    "tong giam doc": "tổng giám đốc",
+    "dong co 3 pha": "động cơ công nghiệp 3 pha",
+    "dong co phong no": "động cơ phòng nổ",
+    "bien tan": "biến tần trung thế",
+    "bien tan trung the": "biến tần trung thế",
+    "bo truyen dong": "bộ truyền động bánh răng",
+    "phu tung": "phụ tùng thay thế",
+    "hoa don gtgt": "hóa đơn giá trị gia tăng",
+    "thue vat": "thuế giá trị gia tăng",
+    "ma so thue": "mã số thuế",
+    "doi tra hang": "đổi trả hàng",
+    "sua chua chung": "sửa chữa chung",
+    "dong son": "đồng sơn",
+    "bien ban giam dinh": "biên bản giám định hiện trường",
+    "to trinh": "tờ trình phê duyệt",
+    "tam ung": "tạm ứng thanh toán",
+    "dat coc": "đặt cọc hợp đồng",
+    "thu hoi": "thu hồi chính sách",
+    "hieu luc": "ngày hiệu lực",
+    "het han": "hết hạn hiệu lực"
+  },
+  "technical_and_product_terms": {
+    "motor 3 pha": {
+      "canonical": "Động cơ công nghiệp 3 pha",
+      "en": "3-phase industrial motor",
+      "category": "Sản phẩm chính"
+    },
+    "inverter": {
+      "canonical": "Biến tần trung thế",
+      "en": "Medium voltage inverter",
+      "category": "Sản phẩm chính"
+    },
+    "gearbox": {
+      "canonical": "Bộ truyền động bánh răng",
+      "en": "Gear drive / Gearbox",
+      "category": "Sản phẩm chính"
+    },
+    "explosion proof motor": {
+      "canonical": "Động cơ phòng nổ",
+      "en": "Explosion-proof motor",
+      "category": "Sản phẩm đặc thù"
+    },
+    "spare parts": {
+      "canonical": "Phụ tùng thay thế",
+      "en": "Spare parts",
+      "category": "Vật tư phụ tùng"
+    },
+    "back order": {
+      "canonical": "Đơn hàng đặt phụ tùng không dự trữ (BO)",
+      "en": "Back order",
+      "category": "Nghiệp vụ kho"
+    },
+    "stock inventory": {
+      "canonical": "Hàng dự trữ lưu kho (Stock)",
+      "en": "Stock inventory",
+      "category": "Nghiệp vụ kho"
+    },
+    "quotation": {
+      "canonical": "Bảng báo giá",
+      "en": "Quotation / Quote",
+      "category": "Thương mại"
+    },
+    "discount rate": {
+      "canonical": "Tỷ lệ chiết khấu thương mại",
+      "en": "Commercial discount rate",
+      "category": "Thương mại"
+    },
+    "down payment": {
+      "canonical": "Tiền đặt cọc / tạm ứng",
+      "en": "Down payment / Deposit",
+      "category": "Thương mại"
+    },
+    "warranty claim": {
+      "canonical": "Yêu cầu bảo hành / khiếu nại bảo hành",
+      "en": "Warranty claim",
+      "category": "Dịch vụ kỹ thuật"
+    },
+    "inspection report": {
+      "canonical": "Biên bản giám định hiện trường",
+      "en": "Field inspection report",
+      "category": "Dịch vụ kỹ thuật"
+    },
+    "tombstone": {
+      "canonical": "Đánh dấu xóa mềm / thu hồi bản ghi",
+      "en": "Tombstone deletion",
+      "category": "Hệ thống"
+    },
+    "quarantine": {
+      "canonical": "Hàng đợi cách ly lỗi schema / thiếu phụ lục",
+      "en": "Quarantine queue",
+      "category": "Hệ thống"
+    },
+    "hold": {
+      "canonical": "Tạm dừng xuất kết luận do xung đột thẩm quyền / điều khoản",
+      "en": "Conflict hold",
+      "category": "Hệ thống"
+    },
+    "referral": {
+      "canonical": "Chuyển tiếp lên cấp thẩm quyền phê duyệt cao hơn",
+      "en": "Hierarchical referral",
+      "category": "Hệ thống"
+    }
+  },
+  "vietnamese_negations_preserved": [
+    "không",
+    "chưa",
+    "chẳng",
+    "miễn",
+    "ngoại trừ",
+    "ngoài",
+    "không được",
+    "cấm",
+    "loại trừ",
+    "không áp dụng",
+    "vắng mặt",
+    "thiếu",
+    "từ chối",
+    "hủy"
+  ]
+}
