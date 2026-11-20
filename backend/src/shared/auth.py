@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+import re
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -51,11 +52,22 @@ def require_roles(*allowed_roles: UserRole) -> Callable[..., AuthenticatedUser]:
 
 
 def check_policy_audience(user: AuthenticatedUser, record_audiences: list[str]) -> bool:
-    """Enforce consistent audience filtering across pre-retrieval, generation, and display."""
-    if UserRole.ADMINISTRATOR in user.roles:
+    """Enforce consistent audience filtering across pre-retrieval, generation, and display (SEC 01)."""
+    if UserRole.ADMINISTRATOR in user.roles or "administrator" in user.allowed_audiences:
         return True
-    normalized = {aud.strip().lower() for aud in record_audiences if aud.strip()}
-    user_scopes = {role.value for role in user.roles} | user.allowed_audiences
+    normalized: set[str] = set()
+    for item in record_audiences:
+        if not item:
+            continue
+        for part in re.split(r"[,;]", item):
+            part_clean = part.strip().lower()
+            if part_clean:
+                normalized.add(part_clean)
+    if not normalized:
+        return False
+    if "all" in normalized or "public" in normalized:
+        return True
+    user_scopes = {role.value.lower() for role in user.roles} | {aud.lower() for aud in user.allowed_audiences}
     return bool(normalized & user_scopes)
 
 

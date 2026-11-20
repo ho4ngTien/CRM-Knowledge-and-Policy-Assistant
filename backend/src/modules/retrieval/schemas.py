@@ -23,5 +23,6 @@ class RetrievalSearchResponse(BaseModel):
 
     normalized_query: str
     expanded_terms: list[str] = Field(default_factory=list)
+    preserved_negations: list[str] = Field(default_factory=list)
     passages: list[PassageSummary] = Field(default_factory=list, max_length=8)
     total_candidates_filtered: int = 0
