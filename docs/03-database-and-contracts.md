@@ -1,6 +1,6 @@
 # 03 — Cơ sở Dữ liệu & Hợp đồng Dữ liệu / API
 
-> Tài liệu đặc tả lược đồ cơ sở dữ liệu PostgreSQL 16 (`22` bảng ORM trên `9` module lưu trữ), chiến lược đánh chỉ mục tìm kiếm lai, hợp đồng `2` tệp CSV UTF-8, danh mục `12` nhóm API `/api/v1/*`, bảng mã lỗi Fail-Closed, cấu trúc JSON `AnswerPackage` `7` phần và thiết kế `shared/contracts.py` cho đội Dev ở Gate `G1`.
+> Tài liệu đặc tả lược đồ cơ sở dữ liệu PostgreSQL 16 (`23` bảng ORM trên `9` module lưu trữ), chiến lược đánh chỉ mục tìm kiếm lai, hợp đồng `2` tệp CSV UTF-8, danh mục `12` nhóm API `/api/v1/*`, bảng mã lỗi Fail-Closed, cấu trúc JSON `AnswerPackage` `7` phần và thiết kế `shared/contracts.py` cho đội Dev ở Gate `G1`.
 
 ---
 
@@ -19,7 +19,7 @@ Cấu hình khởi tạo CSDL nằm tại [infra/db/init.sql](../infra/db/init.s
 
 ## 2. Sơ đồ Thực thể Quan hệ (`erDiagram`) & Danh mục Bảng ORM
 
-Tệp [backend/migrations/env.py](../backend/migrations/env.py) nạp `9` module có mô hình ORM, tạo thành **`22` bảng ORM** (`17` bảng thực thể nghiệp vụ lõi + `5` bảng liên kết/sự kiện/đối soát phụ trợ gồm `user_roles`, `import_manifests`, `policy_lifecycle_events`, `answer_citations`, `evaluation_case_results`). Ba module `admin`, `retrieval`, `validation` xử lý logic miền không tạo bảng riêng.
+Tệp [backend/migrations/env.py](../backend/migrations/env.py) nạp `9` module có mô hình ORM, tạo thành **`23` bảng ORM** (`17` bảng thực thể nghiệp vụ lõi + `6` bảng liên kết/sự kiện/đối soát phụ trợ gồm `user_roles`, `import_manifests`, `import_records`, `policy_lifecycle_events`, `answer_citations`, `evaluation_case_results`). Ba module `admin`, `retrieval`, `validation` xử lý logic miền không tạo bảng riêng.
 
 ```mermaid
 erDiagram
@@ -35,6 +35,7 @@ erDiagram
     policy_versions ||--o{ policy_lifecycle_events : "audits"
 
     import_batches ||--|| import_manifests : "reconciles"
+    import_batches ||--o{ import_records : "stages"
     import_batches ||--o{ quarantine_rows : "isolates"
 
     answer_packages ||--o{ answer_citations : "cites"
@@ -171,6 +172,14 @@ erDiagram
         int quarantined_rows
         json summary_json
     }
+    import_records {
+        int id PK
+        string batch_id FK
+        string source_type
+        string record_id
+        int row_number
+        json raw_payload
+    }
     quarantine_rows {
         int id PK
         string batch_id FK
@@ -279,21 +288,21 @@ erDiagram
     }
 ```
 
-### 2.1 Tóm tắt 22 Bảng ORM theo Module & Chiến lược Index
+### 2.1 Tóm tắt 23 Bảng ORM theo Module & Chiến lược Index
 
 | Module | Danh sách Bảng ORM (`__tablename__`) | Ghi chú khóa & Chiến lược Index (Hiện tại + Migration G1) |
 |---|---|---|
 | `identity` | `users`, `user_roles` | `users.email` (`unique, index`), `user_roles(user_id, role_name)` (`uq_user_role`). |
 | `knowledge` | `documents`, `document_versions`, `passages`, `passage_embeddings` | `status`, `document_id`, `document_version_id`, `is_tombstoned` đánh B-Tree index. **G1 bổ sung:** (1) Composite B-Tree `(status, is_tombstoned, has_essential_attachments)` trên `passages` cho Pre-retrieval Filter; (2) GIN `to_tsvector('simple', unaccent(content))` + GIN `gin_trgm_ops` trên `passages.content`; (3) HNSW `vector_cosine_ops` trên `passage_embeddings.embedding` (`Vector(EMBEDDING_DIM)` = `1536`). |
 | `policy` | `authority_matrix`, `policies`, `policy_versions`, `critical_fields`, `policy_lifecycle_events` | **G1 bổ sung:** Composite B-Tree `(status, effective_from, effective_to)` trên `policy_versions` phục vụ lọc `governing_date` giờ VN; giữ audit bất biến trên `policy_lifecycle_events`. |
-| `ingestion` | `import_batches`, `import_manifests`, `quarantine_rows` | `import_batches.idempotency_key` (`unique`) đảm bảo retry idempotent; `quarantine_rows(batch_id, resolved)` hỗ trợ Steward xử lý hàng đợi lỗi. |
+| `ingestion` | `import_batches`, `import_manifests`, `import_records`, `quarantine_rows` | `import_batches.idempotency_key` (`unique`) đảm bảo retry idempotent; `import_records` lưu staging dòng hợp lệ, `quarantine_rows(batch_id, resolved)` hỗ trợ Steward xử lý hàng đợi lỗi. |
 | `answer` | `answer_packages`, `answer_citations` | Index `task_id`, `user_id`, `status`, `is_stale`, `answer_citations.document_version_id` giúp đánh dấu `is_stale=True` tức thời khi `AdminService.withdraw_policy_immediately` chạy. |
 | `referral` | `local_referrals` | Index `task_id`, `answer_package_id`, `requester_id`, `target_owner`, `status`. |
 | `feedback` | `feedback_candidates` | Index `task_id`, `answer_package_id`, `reporter_id`, `reason`; mặc định `auto_applied=False`. |
 | `audit` | `audit_logs`, `usage_cost_meters` | Index `actor_id`, `action`, `month_key`, `task_id` phục vụ tổng hợp quota tháng (`1.000` pkg / `2.000` calls). |
 | `evaluation` | `evaluation_runs`, `evaluation_case_results` | Index `release_gate`, `partition`, `run_id`, `case_id` tách biệt `real_200` (`dev_60/val_40/sealed_100`) và `challenges_80`. |
 
-*(Lưu ý: Toàn bộ 22 bảng đều kế thừa `TimestampMixin` với cột `created_at` và `updated_at` kiểu `DateTime(timezone=True)`.)*
+*(Lưu ý: Toàn bộ 23 bảng đều kế thừa `TimestampMixin` với cột `created_at` và `updated_at` kiểu `DateTime(timezone=True)`.)*
 
 ---
 
@@ -306,6 +315,8 @@ erDiagram
 - **Idempotency & Late-Batch Guard:** Chạy lại cùng `idempotency_key` không sinh bản ghi trùng; batch có `batch_timestamp` / `recorded_at` cũ hơn phiên bản đang lưu không được phép ghi đè dữ liệu mới hơn (`DAT 02`).
 - **Xóa tường minh (`Tombstone`):** Thiếu dòng trong CSV tuyệt đối không tự hiểu là lệnh xóa; xóa hợp lệ phải dùng `record_action = "tombstone"` hoặc đối soát `full_snapshot` đã duyệt.
 - **Tách biệt `O1` (`DAT 07`):** Không tồn tại CSV template thứ `3` cho ngữ cảnh khách hàng trong Base Scope.
+- **Kiểm chứng checksum & quarantine:** Khi gửi manifest G1, validator đối chiếu SHA-256 theo đúng canonical field set của `data/g1/scripts/validate_g1_repo.ps1`. Dòng hợp lệ được lưu vào `import_records` theo batch; dòng lỗi giữ nguyên payload trong `quarantine_rows`. Đây là vùng staging, không tự phát hành bản ghi vào retrieval.
+- **Nạp có kiểm soát:** `POST /api/v1/ingestion/csv/import` yêu cầu `idempotency_key` và manifest checksum. Nạp lại cùng key/cùng nội dung trả lại cùng batch; dùng lại key với nội dung khác trả `409`.
 
 ### 3.2 `passages_template.csv` — `21` Cột UTF-8
 Khớp 100% `PASSAGES_CSV_COLUMNS` trong [backend/src/modules/ingestion/service.py](../backend/src/modules/ingestion/service.py) và tệp mẫu [data/templates/passages_template.csv](../data/templates/passages_template.csv):
@@ -370,6 +381,7 @@ Khớp 100% `CRITICAL_FIELDS_CSV_COLUMNS` trong [backend/src/modules/ingestion/s
 - `PASSAGE_TOO_LONG`: Độ dài `content` vượt `6.000` ký tự Unicode (`PASSAGE_MAX_CHARS`).
 - `MISSING_ESSENTIAL_ATTACHMENTS`: Cờ `has_essential_attachments != "true"` (`DAT 08`).
 - `MISSING_CURRENCY_UNIT`: Dòng `field_type == "currency"` bị thiếu `currency` (`OPS 04`).
+- `MISSING_REQUIRED_FIELD`, `INVALID_*`, `DUPLICATE_RECORD_ID`, `CHECKSUM_MISSING`, `CHECKSUM_MISMATCH`: Lỗi giá trị/kiểu từng dòng; dòng được cách ly và lưu raw payload.
 
 ---
 
@@ -382,7 +394,7 @@ Khớp 100% `CRITICAL_FIELDS_CSV_COLUMNS` trong [backend/src/modules/ingestion/s
 |---|---|---|---|
 | **Health** | `GET /health` | Public | Trả telemetry: `status`, `timezone`, `streaming_enabled` (`false`), `mounted_modules` (`12`). |
 | **1. `identity`** | `POST /api/v1/identity/token`, `GET /api/v1/identity/me`, `POST /api/v1/identity/check-permission` | Public (`/token`) / Authenticated | Xác thực OIDC/JWT (G1), trả hồ sơ & kiểm tra quyền `audience`. |
-| **2. `ingestion`** | `POST /api/v1/ingestion/csv/validate`, `GET /api/v1/ingestion/quarantine` | `steward`, `administrator` | Kiểm tra dry-run `2` CSV UTF-8 (`21`/`23` cột) & xem danh sách dòng `QuarantineRow`. |
+| **2. `ingestion`** | `POST /api/v1/ingestion/csv/validate`, `POST /api/v1/ingestion/csv/import`, `GET /api/v1/ingestion/quarantine` | `steward`, `policy_owner`, `administrator` | Dry-run hoặc nạp có kiểm soát `2` CSV UTF-8 (`21`/`23` cột) với manifest checksum; xem danh sách dòng `QuarantineRow`. |
 | **3. `knowledge`** | `GET /api/v1/knowledge/passages/{passage_id}`, `GET /api/v1/knowledge/documents/{document_id}/lineage`, `GET /api/v1/knowledge/snapshot-age` | Authenticated (`audience` checked) | Xem chi tiết nguồn trực tiếp (thực thi `403`/`409` đồng nhất với `/chat`), lịch sử `supersedes` & độ tuổi snapshot. |
 | **4. `policy`** | `GET /api/v1/policy/authority-matrix`, `GET /api/v1/policy/versions/{policy_version_id}/critical-fields`, `POST /api/v1/policy/threshold-check` | Authenticated | Đọc `5` lớp thẩm quyền, lấy `CriticalField` từ DB & tính so sánh biên ngoài LLM. |
 | **5. `retrieval`** | `POST /api/v1/retrieval/search` | Authenticated | Chuẩn hóa truy vấn tiếng Việt + tìm kiếm lai đã pre-filter (`<= 8` đoạn). |
