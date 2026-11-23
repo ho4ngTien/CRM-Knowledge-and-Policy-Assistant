@@ -16,7 +16,20 @@
 
 ---
 
-## 2. Lộ trình Đọc theo Vai trò (`P1–P5` & `S1–S5`)
+## 2. Đặc tả Kỹ thuật G0, Ma trận Tuân thủ & Gói Công việc
+
+| Thư mục / Tài liệu | Nội dung chuẩn hóa trong Build Repo |
+|---|---|
+| [rfp-compliance-matrix.md](./rfp-compliance-matrix.md) | Ma trận đánh giá tuân thủ RFP & truy vết Jira theo 5 cổng nghiệm thu (`G0–G4`) và từng nhóm yêu cầu (`DAT`, `ANS`, `KNW`, `SEC`, `OPS`, `DEL`). |
+| [architecture/rbac-matrix.md](./architecture/rbac-matrix.md) | Hợp đồng API `/api/v1/*`, cấu trúc `AnswerPackage` 7 phần, ma trận RBAC 8 vai trò và cấu hình LLM khóa cứng tại Gate G0. |
+| [`specs/g0/`](./specs/g0/) | Bộ **20 tệp đặc tả kỹ thuật G0** đồng bộ từ Jira, chia làm 4 nhóm:<br>- [`specs/g0/policy-and-scope/`](./specs/g0/policy-and-scope/) (`CKPA-09`: 3 họ chính sách, Authority Matrix 5 lớp, ngày hiệu lực, conflict hold, ranh giới O1)<br>- [`specs/g0/rbac-and-legal/`](./specs/g0/rbac-and-legal/) (`CKPA-17`, `CKPA-34`: RBAC 20 users / 5 concurrent, checklist pháp lý/AI Phụ lục F & Phụ lục C)<br>- [`specs/g0/architecture-and-contracts/`](./specs/g0/architecture-and-contracts/) (`CKPA-21`, `CKPA-29`: chính sách ngoài prompt, hard caps Mục 2, Evidence Workspace & 9 hợp đồng Phụ lục B)<br>- [`specs/g0/qa-and-operations/`](./specs/g0/qa-and-operations/) (`CKPA-30`, `CKPA-33`, `CKPA-35`: kế hoạch nghiệm thu 280 ca, phân loại lỗi HOLD, benchmark & SLA `OPS 01–08`, ma trận testability) |
+| [`work-packages/`](./work-packages/) | Báo cáo kiểm toán và tổng kết gói công việc trong Build repo (gồm [ckpa-70-g1-rbac-cache-failclosed-audit.md](./work-packages/ckpa-70-g1-rbac-cache-failclosed-audit.md) và [ckpa-56-sprint3-review-retro.md](./work-packages/ckpa-56-sprint3-review-retro.md)). |
+
+> **Lưu ý phân tách ngoài Build repo:** Các tệp đánh giá niêm phong (`sealed_100`, `80 Challenges`) và hồ sơ thương mại/quản trị Bên mua (`CKPA-37`, `CKPA-39`, `CKPA-41`) được quản lý riêng tại `sealed-eval-repo` / Jira / kho quản trị Bên mua theo quy tắc Chinese Wall (Mục 8 RFP) và DEL 05.
+
+---
+
+## 3. Lộ trình Đọc theo Vai trò (`P1–P5` & `S1–S5`)
 
 | Nhóm vai trò (RFP Mục 11) | Thành viên | Lộ trình đọc khuyến nghị | Điểm cần lưu ý bắt buộc |
 |---|---|---|---|
@@ -28,7 +41,7 @@
 
 ---
 
-## 3. Thứ tự Ưu tiên Tài liệu & Liên kết Kỹ thuật trong Repository
+## 4. Thứ tự Ưu tiên Tài liệu & Liên kết Kỹ thuật trong Repository
 
 ### Thứ tự ưu tiên khi giải quyết mâu thuẫn (Document Precedence)
 1. Hợp đồng đã ký và các phụ lục sửa đổi có hiệu lực.

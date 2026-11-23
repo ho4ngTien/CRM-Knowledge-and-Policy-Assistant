@@ -53,11 +53,11 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Streamlit configuration & logs
-.streamlit/*
-!.streamlit/config.toml
-
 # Temporary diagnostic & test output files
 *.txt
 !requirements.txt
 SongNhat_RFP_Mapping
+
+.agents
+_restricted_out_of_repo/
+*.tsbuildinfo

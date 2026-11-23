@@ -4,6 +4,8 @@
 >
 > *(Lưu ý RFP Mục 6 & Mục 13: Kiến trúc dưới đây là thiết kế tham chiếu cho tuyến phát triển tùy chỉnh có giới hạn — không khóa nhà cung cấp, model AI hay workflow engine; mọi thành phần tuân thủ chặt Base Scope `M`, không chứa code `O1`.)*
 
+> **Tổ chức mã nguồn:** Runtime G0/G1 đang hoạt động gồm UI/UX trong `frontend/`, API và nghiệp vụ trong `backend/src/` (cấu hình chuẩn tại `backend/src/config.py` + `.env.example`), tác vụ bất đồng bộ trong `worker/src/tasks/` và prompt tại `prompts/answer_system_vi.txt`. Bản Python/Streamlit S4 trước đây được lưu trữ (archived prototype) tại `legacy/s4/` cùng `legacy/prompts/`, `legacy/tests/`, `legacy/pytest.ini`, tài liệu và dependency riêng — hoàn toàn nằm ngoài luồng runtime G0/G1 hiện tại.
+
 ---
 
 ## 1. Sáu Bất biến Kiến trúc (`INV-01 .. INV-06`)
