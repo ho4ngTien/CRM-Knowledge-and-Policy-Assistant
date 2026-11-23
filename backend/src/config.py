@@ -7,7 +7,10 @@ class Settings(BaseSettings):
     APP_ENV: str = "development"
     APP_SECRET_KEY: str = "change-me"
     LOG_LEVEL: str = "INFO"
-    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 
     DATABASE_URL: str = "postgresql+asyncpg://ckpa:ckpa_pass@localhost:5432/ckpa_db"
     DATABASE_POOL_SIZE: int = 10
