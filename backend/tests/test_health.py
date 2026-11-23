@@ -14,6 +14,13 @@ async def test_health(client):
     assert payload["mounted_modules"] == 12
 
 
+@pytest.mark.asyncio
+async def test_selection_health_is_mounted_at_api_selection_path(client):
+    response = await client.get("/api/v1/selection/health")
+    assert response.status_code == 200
+    assert response.json()["module"] == "selection"
+
+
 def test_sec06_environment_and_llm_contract_bounds():
     assert settings.APP_ENV in {"development", "test"}
     assert settings.APP_TIMEZONE == "Asia/Ho_Chi_Minh"

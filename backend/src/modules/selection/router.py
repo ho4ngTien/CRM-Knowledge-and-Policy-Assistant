@@ -13,7 +13,7 @@ from src.modules.selection.service import SelectionService
 from src.shared.auth import AuthenticatedUser, get_current_user
 from src.shared.contracts import PolicyGateDecision
 
-router = APIRouter(prefix="/selection", tags=["Selection"])
+router = APIRouter(tags=["Selection"])
 
 
 class SelectionRequest(BaseModel):
