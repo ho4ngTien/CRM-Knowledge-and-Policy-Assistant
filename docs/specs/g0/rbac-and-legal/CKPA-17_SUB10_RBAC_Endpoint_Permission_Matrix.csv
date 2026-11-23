@@ -1,0 +1,34 @@
+endpoint_id,module,method,path,reader,policy_owner,publisher,steward,administrator,independent_evaluator,privacy_security_owner,legal_owner,referral_handler,g1_code_sync_flag,notes
+EP-01,Global,GET,/health,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,OK_G0_SCAFFOLD,Kiểm tra liveness và cờ quản trị hệ thống không chứa dữ liệu nhạy cảm
+EP-02,Identity,POST,/api/v1/identity/token,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,G1_IMPLEMENT_OIDC_AND_REDIS_5_LOCK,Đổi token OIDC/SSO doanh nghiệp; áp dụng giới hạn <= 5 phiên đồng thời qua Redis lock và claim env
+EP-03,Identity,GET,/api/v1/identity/me,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,G1_IMPLEMENT_OIDC_AND_REDIS_5_LOCK,Trả thông tin định danh tổ chức và vai trò được cấp
+EP-04,Identity,POST,/api/v1/identity/check-permission,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,G1_REVIEW_ADMIN_BYPASS_AUTH_PY,Kiểm tra đặc quyền tối thiểu theo audience và 6 chiều DAT 04
+EP-05,Knowledge,GET,/api/v1/knowledge/passages/{passage_id},ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,G1_ENFORCE_EFFECTIVE_AND_AUDIENCE,Xem đoạn trích gốc theo URL; chặn tức thời nếu trạng thái withdrawn hoặc sai audience
+EP-06,Knowledge,GET,/api/v1/knowledge/documents/{document_id}/lineage,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,OK_G0_SCAFFOLD,Truy vết phả hệ phiên bản (draft/owner_reviewed/approved/scheduled/effective/superseded/withdrawn)
+EP-07,Knowledge,GET,/api/v1/knowledge/snapshot-age,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,OK_G0_SCAFFOLD,Hiển thị tuổi snapshot dữ liệu và cảnh báo khi > 25 giờ
+EP-08,Ingestion,POST,/api/v1/ingestion/csv/validate,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,DENY,G1_ADD_TRANSACTION_SCOPE_6DIM,Dry-run kiểm tra UTF-8 CSV 6 chiều DAT 04; cách ly dòng lỗi vào quarantined
+EP-09,Ingestion,GET,/api/v1/ingestion/quarantine,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,DENY,OK_G0_SCAFFOLD,Xem danh sách dòng bị cách ly chờ Steward và Policy Owner xử lý
+EP-10,Policy,GET,/api/v1/policy/authority-matrix,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,OK_G0_SCAFFOLD,Xem Ma trận thẩm quyền 5 lớp DAT 03 và danh sách chủ sở hữu/người thay thế
+EP-11,Policy,GET,/api/v1/policy/versions/{policy_version_id}/critical-fields,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,G1_ADD_TRANSACTION_SCOPE_AND_TOMBSTONE,Đọc danh sách trường trọng yếu định kiểu gắn điều khoản nguồn
+EP-12,Policy,POST,/api/v1/policy/threshold-check,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,OK_G0_SCAFFOLD,Kiểm tra ngưỡng số học/đơn vị tiền tệ tất định hoàn toàn ngoài LLM
+EP-13,Retrieval,POST,/api/v1/retrieval/search,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,G1_ENFORCE_6DIM_PRE_RETRIEVAL,Tìm kiếm lai tiếng Việt giới hạn <= 8 đoạn sau khi lọc quyền/effective/ngày/6 chiều DAT 04
+EP-14,Answer,POST,/api/v1/answer/,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,ALLOW,G1_ENFORCE_NO_STREAMING_AND_CAPS,Sinh AnswerPackage 7 phần không stream; tối đa 2 calls và 6000/900 tokens
+EP-15,Answer,POST,/api/v1/answer/follow-up,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,ALLOW,G1_ENFORCE_TASK_LINKAGE,Hỏi tiếp kế thừa task_id và tính vào hạn mức 1000 AnswerPackages/tháng
+EP-16,Answer,POST,/api/v1/answer/regenerate,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,ALLOW,G1_ENFORCE_TASK_LINKAGE,Sinh lại câu trả lời sau khi làm rõ dữ kiện hoặc cập nhật nguồn; tính vào hạn mức tháng
+EP-17,Validation,POST,/api/v1/validation/verify,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,G1_SERIALIZE_WITHDRAWAL_CHECK,Kiểm tra lại hiệu lực nguồn và quyền trước khi hiển thị UI (KNW 07 / SEC 05)
+EP-18,Referral,POST,/api/v1/referral/,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,ALLOW,OK_G0_SCAFFOLD,Tạo phiếu chuyển tiếp nội bộ (KNW 04; không tự động phê duyệt)
+EP-19,Referral,GET,/api/v1/referral/,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,ALLOW,OK_G0_SCAFFOLD,Xem danh sách phiếu chuyển tiếp theo phạm vi quyền hạn
+EP-20,Referral,PATCH,/api/v1/referral/{referral_id},DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,ALLOW,OK_G0_SCAFFOLD,Cập nhật trạng thái referred/owner_responded/closed
+EP-21,Feedback,POST,/api/v1/feedback/,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,ALLOW,OK_G0_SCAFFOLD,Gửi phản hồi theo 5 lý do chuẩn KNW 07
+EP-22,Feedback,GET,/api/v1/feedback/candidates,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,DENY,OK_G0_SCAFFOLD,Xem danh sách feedback_candidate chờ chủ sở hữu xem xét trước khi xuất bản
+EP-23,Audit,GET,/api/v1/audit/logs,DENY,DENY,DENY,DENY,ALLOW,DENY,ALLOW,ALLOW,DENY,G1_ADD_LEGAL_OWNER_ENUM,Đọc nhật ký kiểm toán hạn chế đã tối thiểu hóa PII (SEC 01 / Annex C)
+EP-24,Audit,GET,/api/v1/audit/cost-meter,DENY,ALLOW,ALLOW,DENY,ALLOW,DENY,ALLOW,DENY,DENY,OK_G0_SCAFFOLD,Theo dõi token/calls/holds/failures và hạn mức tháng (OPS 06 / OPS 08)
+EP-25,Audit,GET,/api/v1/audit/export-open,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,ALLOW,DENY,DENY,OK_G0_SCAFFOLD,Xuất dữ liệu định dạng mở UTF-8 CSV/JSON/Markdown không khóa công nghệ (OPS 08)
+EP-26,Evaluation,POST,/api/v1/evaluation/runs (dev_60/val_40),DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,G1_FIX_AUTH_PY_LINES_65_72,Chạy đánh giá phân vùng dev_60/val_40 do QA độc lập thực hiện
+EP-27,Evaluation,POST,/api/v1/evaluation/runs (sealed_100),DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,G1_FIX_AUTH_PY_LINES_65_72,CHINESE WALL: Chỉ independent_evaluator [S4] được chạy sealed_100; administrator [S5] bị DENY
+EP-28,Evaluation,GET,/api/v1/evaluation/runs (dev_60/val_40),ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,OK_G0_SCAFFOLD,Xem kết quả đánh giá công khai trên dev_60/val_40
+EP-29,Evaluation,GET,/api/v1/evaluation/runs (sealed_100),DENY,ALLOW_CONTROLLED_REVIEW,DENY,ALLOW_CONTROLLED_REVIEW,DENY,ALLOW,DENY,DENY,DENY,G1_FIX_AUTH_PY_LINES_65_72,CHINESE WALL: administrator (gồm [S5]) bị DENY; [S4] độc lập thực thi; Policy Reviewers [P2]/[P3] chỉ xem báo cáo phân xử có kiểm soát (không lộ sang đội Build)
+EP-30,Admin,POST,/api/v1/admin/policies/{policy_version_id}/transition,DENY,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,G1_ADD_PUBLISHER_ENUM,Chuyển 7 trạng thái vòng đời KNW 03 (chính sách thuộc quyền Bên mua; administrator không tự phê duyệt chính sách)
+EP-31,Admin,POST,/api/v1/admin/policies/{policy_version_id}/withdraw,DENY,ALLOW,ALLOW,DENY,ALLOW,DENY,ALLOW,DENY,DENY,G1_SERIALIZE_WITHDRAWAL_OPS05,Thu hồi tức thời commit DB trước khi phản hồi và xóa cache <= 300s (SEC 05 / OPS 05)
+EP-32,Admin,POST,/api/v1/admin/emergency-disable,DENY,ALLOW,DENY,DENY,ALLOW,DENY,ALLOW,DENY,DENY,OK_G0_SCAFFOLD,Bật công tắc ngắt khẩn cấp chuyển sang tra cứu thủ công an toàn
+EP-33,Admin,GET,/api/v1/admin/ops-summary,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,ALLOW,DENY,DENY,OK_G0_SCAFFOLD,Giám sát runtime Base Scope caps và trạng thái Option O1 OFF

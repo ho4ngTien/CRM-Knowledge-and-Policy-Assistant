@@ -153,23 +153,38 @@ Hệ thống được thiết kế theo mô hình **5 tầng** bảo đảm ki�
 ```text
 .
 ├── .github/workflows/ci.yml      # CI pipeline (ruff, mypy, pytest, compileall, CSV check, docs-link-check)
-├── backend/                      # FastAPI Modular Monolith (12 modules, Alembic, mypy, pytest)
+├── backend/                      # Active G0/G1 runtime — FastAPI Modular Monolith (Alembic, mypy, pytest)
 │   ├── migrations/               # Alembic database migrations
 │   ├── src/modules/              # admin, answer, audit, evaluation, feedback, identity,
-│   │                             # ingestion, knowledge, policy, referral, retrieval, validation
+│   │                             # ingestion, knowledge, policy, referral, retrieval, selection, validation
 │   └── tests/                    # Unit, contract, eval/ & ops/ test suites
-├── worker/                       # Celery Worker + Beat (import_task, index_task, eval_task)
-├── frontend/src/app/             # Next.js 14 App Router (/, chat, evidence, referrals, admin)
-├── data/                         # Hợp đồng 2 CSV UTF-8 (templates/), dữ liệu mẫu & eval/
+├── worker/                       # Active G0/G1 runtime — Celery Worker + Beat (import_task, index_task, eval_task)
+├── frontend/src/app/             # Active G0/G1 runtime — Next.js 14 App Router (/, chat, evidence, referrals, admin)
+├── data/                         # Dữ liệu G1 (g1/), hợp đồng 2 CSV UTF-8 (templates/), dữ liệu mẫu & eval/
+│   ├── g1/                       # Bộ dữ liệu nạp & kiểm thử cho Gate G1
+│   ├── templates/                # Hợp đồng 2 CSV UTF-8 (21 & 23 cột)
+│   ├── eval/                     # Bộ câu hỏi đánh giá (dev/val/sealed)
+│   └── sample/                   # Dữ liệu mẫu
 ├── infra/                        # PostgreSQL init.sql & Nginx reverse proxy config
-├── prompts/                      # System prompt tiếng Việt có trích dẫn (answer_system_vi.txt)
-├── docs/                         # Trung tâm tài liệu chuẩn hóa 6 tệp (xem docs/README.md)
+├── prompts/                      # System prompt tiếng Việt cho runtime G0/G1 (answer_system_vi.txt)
+├── docs/                         # Trung tâm tài liệu chuẩn hóa (xem docs/README.md)
 │   ├── README.md                 # Mục lục điều hướng tài liệu
 │   ├── 01-overview.md            # Tổng quan nghiệp vụ, Base Scope (M) & ranh giới O / O1
-│   ├── 02-architecture.md        # Kiến trúc 5 tầng, 12 module, Celery Worker + Beat & RAG Gate
+│   ├── 02-architecture.md        # Kiến trúc 5 tầng, Modular Monolith, Celery Worker + Beat & RAG Gate
 │   ├── 03-database-and-contracts.md  # ERD, PostgreSQL/pgvector & hợp đồng 2 CSV UTF-8
 │   ├── 04-setup-and-operations.md    # Cài đặt, vận hành, kiểm thử 4 tầng & OPS 01–08
-│   └── 05-roadmap-and-team.md    # Lộ trình 5 Gate (G0–G4), 10 vai RFP & quy tắc Dual-Hat
+│   ├── 05-roadmap-and-team.md    # Lộ trình 5 Gate (G0–G4), 10 vai RFP & quy tắc Dual-Hat
+│   ├── rfp-compliance-matrix.md  # Ma trận đánh giá tuân thủ RFP & truy vết Jira (G0–G4)
+│   ├── architecture/             # Hợp đồng API, ma trận RBAC & cấu hình khóa Gate G0
+│   ├── specs/g0/                 # 20 tệp đặc tả G0 (policy-and-scope, rbac-and-legal, architecture-and-contracts, qa-and-operations)
+│   └── work-packages/            # Báo cáo kiểm toán & gói công việc (WP01–WP08, CKPA-56, CKPA-70)
+├── legacy/                       # Archived S4 Python/Streamlit prototype (ngoài active G0/G1 runtime)
+│   ├── docs/                     # Tài liệu an toàn riêng của prototype
+│   ├── prompts/                  # Prompt S4 đã lưu trữ
+│   ├── s4/                       # Prototype services and Streamlit components
+│   ├── tests/                    # Tests for the archived prototype
+│   ├── pytest.ini                # Cấu hình pytest riêng cho legacy/tests
+│   └── requirements.txt          # Prototype-only dependencies
 ├── .env.example                  # Biến môi trường mẫu (Base Scope M)
 ├── docker-compose.yml            # db, redis + các service ứng dụng dưới profile app
 ├── dev.ps1 & Makefile            # Script thao tác nhanh cho local dev, lint, mypy, pytest, migrate
@@ -536,6 +551,7 @@ docker compose --profile app down   # hoặc: .\dev.ps1 down / make down
 make lint               # chạy ruff + mypy + compileall + lint frontend
 make test               # chạy pytest -q + build frontend
 ```
+Để chạy bộ test prototype đã lưu trữ trong `legacy/tests/`, dùng `python -m pytest -c legacy/pytest.ini legacy/tests -q` (cài dependency bằng `pip install -r legacy/requirements.txt` nếu cần).
 Hoặc chạy trực tiếp trong `backend/`:
 ```bash
 cd backend
@@ -588,22 +604,36 @@ flowchart TB
 
 ```text
 crm-knowledge-and-policy-assistant/
-├── backend/
-│   ├── src/modules/       # Các module API và nghiệp vụ
-│   ├── migrations/        # Migration cơ sở dữ liệu
+├── backend/                      # Active G0/G1 runtime — FastAPI Modular Monolith
+│   ├── src/modules/              # Các module API và nghiệp vụ (gồm selection)
+│   ├── migrations/               # Migration cơ sở dữ liệu
 │   └── tests/
 ├── frontend/
-│   └── src/app/           # Các trang Next.js
+│   └── src/app/                  # Các trang Next.js
 ├── worker/
-│   └── src/tasks/         # Tác vụ nền Celery
+│   └── src/tasks/                # Tác vụ nền Celery
+├── prompts/
+│   └── answer_system_vi.txt      # System prompt tiếng Việt (runtime G0/G1)
 ├── data/
-│   ├── sample/
-│   └── templates/
+│   ├── g1/                       # Dữ liệu kiểm thử & nạp mẫu G1
+│   ├── templates/                # Hợp đồng 2 CSV UTF-8
+│   ├── eval/                     # Bộ dữ liệu đánh giá (dev/val/sealed)
+│   └── sample/
 ├── docs/
-│   └── work-packages/
+│   ├── rfp-compliance-matrix.md  # Ma trận đánh giá tuân thủ RFP & truy vết Jira
+│   ├── architecture/             # Hợp đồng API & ma trận RBAC Gate G0
+│   ├── specs/g0/                 # Đặc tả kỹ thuật G0 chuẩn hóa (4 nhóm)
+│   └── work-packages/            # Báo cáo kiểm toán & gói công việc WP01–WP08
 ├── infra/
 │   ├── db/
 │   └── nginx/
+├── legacy/                       # Archived S4 prototype (ngoài active G0/G1 runtime)
+│   ├── docs/                     # Tài liệu của prototype cũ
+│   ├── prompts/                  # Prompt S4 đã lưu trữ
+│   ├── s4/                       # Prototype Python/Streamlit cũ
+│   ├── tests/                    # Test của prototype
+│   ├── pytest.ini                # Cấu hình pytest riêng cho legacy/tests
+│   └── requirements.txt          # Dependency riêng của prototype
 ├── docker-compose.yml
 └── Makefile
 ```

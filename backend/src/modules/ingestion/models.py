@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db import Base, TimestampMixin
@@ -36,6 +36,24 @@ class ImportManifest(TimestampMixin, Base):
     rejected_rows: Mapped[int] = mapped_column(Integer, nullable=False)
     quarantined_rows: Mapped[int] = mapped_column(Integer, nullable=False)
     summary_json: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class ImportRecord(TimestampMixin, Base):
+    """Validated row staged by an import batch without publishing it to retrieval."""
+
+    __tablename__ = "import_records"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "source_type", "record_id", name="uq_import_record_batch_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    batch_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("import_batches.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    record_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
 
 
 class QuarantineRow(TimestampMixin, Base):

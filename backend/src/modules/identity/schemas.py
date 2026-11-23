@@ -1,4 +1,4 @@
-"""Pydantic schemas for organizational authentication and RBAC introspection."""
+"""Pydantic schemas for organizational authentication and 4-role IAM introspection."""
 
 from pydantic import BaseModel, Field
 
@@ -42,3 +42,20 @@ class PermissionCheckResponse(BaseModel):
     allowed: bool
     user_id: str
     effective_roles: list[UserRole]
+
+
+class IamEnvironmentStatusResponse(BaseModel):
+    """Gate G1 isolated Test vs Prod (VPC/DB/Storage/Keys) & 4-role IAM telemetry."""
+
+    app_env: str
+    isolated_from_production: bool
+    isolation_layers: dict[str, bool]
+    llm_allow_training: bool
+    llm_zero_data_retention: bool
+    llm_telemetry_enabled: bool
+    core_system_roles: list[UserRole]
+    named_users_count: int
+    max_named_users: int
+    active_sessions_count: int
+    max_concurrent_sessions: int
+    audit_events_count: int

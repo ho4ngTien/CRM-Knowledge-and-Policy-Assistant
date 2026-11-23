@@ -25,6 +25,9 @@ class CsvValidationReport(BaseModel):
     rejected_rows: int
     quarantined_rows: int
     quarantine_issues: list[QuarantineIssue] = Field(default_factory=list)
+    batch_id: str | None = None
+    imported_rows: int = 0
+    snapshot_age_seconds: int | None = None
 
 
 class QuarantineItemResponse(BaseModel):

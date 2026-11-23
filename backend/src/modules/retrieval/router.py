@@ -18,9 +18,11 @@ async def search_curated_knowledge(
     """Run pre-filtered Vietnamese hybrid retrieval bounded to <= 8 passages."""
     _ = current_user
     normalized, expanded = service.normalize_query_vi(payload.query)
+    negations = service.detect_preserved_negations(payload.query)
     return RetrievalSearchResponse(
         normalized_query=normalized,
         expanded_terms=expanded,
+        preserved_negations=negations,
         passages=[],
         total_candidates_filtered=0,
     )

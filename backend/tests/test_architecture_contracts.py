@@ -113,9 +113,7 @@ class _StubCachePurger:
     def __init__(self) -> None:
         self.purged: list[tuple[str, str]] = []
 
-    async def purge_policy_caches(
-        self, policy_version_id: str, document_version_id: str
-    ) -> int:
+    async def purge_policy_caches(self, policy_version_id: str, document_version_id: str) -> int:
         self.purged.append((policy_version_id, document_version_id))
         return 1
 
@@ -149,14 +147,10 @@ class _StubRetrieval:
         return list(self._passages)
 
     async def fetch_authoritative_passages(
-        self, user: AuthenticatedUser, passage_ids: list[str]
+        self, user: AuthenticatedUser, passage_ids: list[str], db: object | None = None
     ) -> dict[str, PassageSummary]:
         _ = user
-        return {
-            pid: self._live_passages[pid]
-            for pid in passage_ids
-            if pid in self._live_passages
-        }
+        return {pid: self._live_passages[pid] for pid in passage_ids if pid in self._live_passages}
 
 
 class _StubAuditMeter:
@@ -439,9 +433,7 @@ def test_verify_final_delivery_worked_case_9_and_integrity_checks(
     assert held_pkg.critical_fields == []
 
     # BETWEEN critical field ("5;10") checks both bounds individually.
-    between_cf = cf.model_copy(
-        update={"operator": ComparisonOperator.BETWEEN, "value": "5;10"}
-    )
+    between_cf = cf.model_copy(update={"operator": ComparisonOperator.BETWEEN, "value": "5;10"})
     assert (
         validator.verify_critical_fields_integrity(
             "Chiết khấu từ 5% đến 10% do QLBH phê duyệt.", [between_cf]
@@ -623,9 +615,9 @@ async def test_service_scaffolds_policy_gate_snapshot_quota_and_emergency_disabl
     draft_cf = _sample_critical_field(status=PolicyLifecycleStatus.DRAFT).model_copy(
         update={"field_id": "CF-DRAFT"}
     )
-    quarantined_cf = _sample_critical_field(
-        status=PolicyLifecycleStatus.QUARANTINED
-    ).model_copy(update={"field_id": "CF-QUAR"})
+    quarantined_cf = _sample_critical_field(status=PolicyLifecycleStatus.QUARANTINED).model_copy(
+        update={"field_id": "CF-QUAR"}
+    )
     gate_res = policy_svc.evaluate_policy_gate(
         [naive_candidate],
         requested_date=date(2026, 11, 18),

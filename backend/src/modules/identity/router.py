@@ -1,8 +1,9 @@
-"""Identity & RBAC HTTP router (/api/v1/identity/*)."""
+"""Identity & 4-Role IAM HTTP router (/api/v1/identity/*)."""
 
 from fastapi import APIRouter, Depends
 
 from src.modules.identity.schemas import (
+    IamEnvironmentStatusResponse,
     PermissionCheckRequest,
     PermissionCheckResponse,
     TokenRequest,
@@ -10,7 +11,8 @@ from src.modules.identity.schemas import (
     UserProfileResponse,
 )
 from src.modules.identity.service import IdentityService
-from src.shared.auth import AuthenticatedUser, get_current_user
+from src.shared.auth import AuthenticatedUser, get_current_user, require_roles
+from src.shared.enums import UserRole
 
 router = APIRouter()
 service = IdentityService()
@@ -18,9 +20,8 @@ service = IdentityService()
 
 @router.post("/token", response_model=TokenResponse)
 async def issue_token(payload: TokenRequest) -> TokenResponse:
-    """Authenticate against enterprise identity provider (Gate G1)."""
-    _ = payload
-    service.exchange_token_not_configured()
+    """Authenticate against Gate G1 20 named users directory and issue env-bound JWT."""
+    return service.exchange_token(payload.id_token)
 
 
 @router.get("/me", response_model=UserProfileResponse)
@@ -38,3 +39,13 @@ async def verify_audience_permission(
 ) -> PermissionCheckResponse:
     """Verify whether the authenticated user may access a policy audience tag list."""
     return service.check_audience(current_user, payload.required_audiences)
+
+
+@router.get("/iam-status", response_model=IamEnvironmentStatusResponse)
+async def get_iam_and_environment_isolation_status(
+    current_user: AuthenticatedUser = Depends(
+        require_roles(UserRole.ADMINISTRATOR, UserRole.PRIVACY_SECURITY_OWNER)
+    ),
+) -> IamEnvironmentStatusResponse:
+    """Inspect SEC 06 Test/Prod isolation, SEC 04 training lock, and 4-role IAM telemetry."""
+    return service.get_iam_environment_status(current_user)

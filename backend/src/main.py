@@ -1,4 +1,9 @@
-"""FastAPI application entrypoint mounting all 12 SRS modules & fail-closed handlers."""
+"""FastAPI application entrypoint mounting all 12 SRS modules & fail-closed handlers [CKPA-17].
+
+Gate: G1 | SRS: Mục 4.3, Mục 7.2, SRS-FR-06.1 | RFP: ANS03, ANS04, DEL02
+Responsible: C1 (Phạm Lương Yến Nhi — Lead LLM Eng), B2 (Hữu Tài — Policy Eng),
+B3 (Phạm Quý Hải — Retrieval Eng)
+"""
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +21,7 @@ from src.modules.knowledge.router import router as knowledge_router
 from src.modules.policy.router import router as policy_router
 from src.modules.referral.router import router as referral_router
 from src.modules.retrieval.router import router as retrieval_router
+from src.modules.selection.router import router as selection_router
 from src.modules.validation.router import router as validation_router
 from src.shared.exceptions import (
     AccessDenied,
@@ -91,6 +97,7 @@ app.include_router(referral_router, prefix=f"{API}/referral", tags=["Referral"])
 app.include_router(feedback_router, prefix=f"{API}/feedback", tags=["Feedback"])
 app.include_router(audit_router, prefix=f"{API}/audit", tags=["Audit"])
 app.include_router(evaluation_router, prefix=f"{API}/evaluation", tags=["Evaluation"])
+app.include_router(selection_router, prefix=f"{API}/selection", tags=["Selection"])
 app.include_router(admin_router, prefix=f"{API}/admin", tags=["Admin"])
 
 

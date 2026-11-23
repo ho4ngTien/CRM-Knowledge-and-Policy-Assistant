@@ -64,7 +64,12 @@ class AnswerOrchestratorService:
     ) -> None:
         self._policy_service = PolicyService()
         self._policy_gate: PolicyGatePort = policy_gate or self._policy_service
-        self._retrieval_port: RetrievalPort = retrieval_port or RetrievalService()
+        selected_retrieval: RetrievalPort
+        if retrieval_port is not None:
+            selected_retrieval = retrieval_port
+        else:
+            selected_retrieval = RetrievalService()
+        self._retrieval_port = selected_retrieval
         self._llm_generator: LLMGeneratorPort | None = llm_generator
         self._validation_gate: ValidationGatePort = validation_gate or ValidationService()
         self._audit_meter: AuditMeterPort = audit_meter or AuditService()
@@ -418,12 +423,11 @@ class AnswerOrchestratorService:
         # Layer 5: Post-generation authoritative re-fetch, validation & usage/audit metering.
         passage_ids = list(
             dict.fromkeys(
-                [c.passage_id for c in candidate_pkg.citations]
-                + [p.passage_id for p in passages]
+                [c.passage_id for c in candidate_pkg.citations] + [p.passage_id for p in passages]
             )
         )
         authoritative_passages = await self._retrieval_port.fetch_authoritative_passages(
-            user, passage_ids
+            user, passage_ids, db
         )
         verified = self._validation_gate.verify_final_delivery(
             user,

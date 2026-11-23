@@ -4,6 +4,8 @@
 >
 > *(Lưu ý RFP Mục 6 & Mục 13: Kiến trúc dưới đây là thiết kế tham chiếu cho tuyến phát triển tùy chỉnh có giới hạn — không khóa nhà cung cấp, model AI hay workflow engine; mọi thành phần tuân thủ chặt Base Scope `M`, không chứa code `O1`.)*
 
+> **Tổ chức mã nguồn:** Runtime G0/G1 đang hoạt động gồm UI/UX trong `frontend/`, API và nghiệp vụ trong `backend/src/` (cấu hình chuẩn tại `backend/src/config.py` + `.env.example`), tác vụ bất đồng bộ trong `worker/src/tasks/` và prompt tại `prompts/answer_system_vi.txt`. Bản Python/Streamlit S4 trước đây được lưu trữ (archived prototype) tại `legacy/s4/` cùng `legacy/prompts/`, `legacy/tests/`, `legacy/pytest.ini`, tài liệu và dependency riêng — hoàn toàn nằm ngoài luồng runtime G0/G1 hiện tại.
+
 ---
 
 ## 1. Sáu Bất biến Kiến trúc (`INV-01 .. INV-06`)
@@ -120,7 +122,7 @@ Mỗi module tuân thủ chuẩn `4` tệp (`router.py`, `schemas.py`, `service.
 |---:|---|---|---|
 | 1 | `identity` | Xác thực danh tính tổ chức (`OIDC/JWT` tại G1), hồ sơ user, kiểm tra `least privilege` & `audience` (`SEC 01`). | `S5` (`P5` duyệt) |
 | 2 | `knowledge` | Quản lý `Document`, `DocumentVersion`, `Passage`, `PassageEmbedding`, `supersedes`, `is_tombstoned` & `SnapshotAge`. | `S2` (`P3` nguồn) |
-| 3 | `ingestion` | Validate `2` CSV UTF-8 cơ sở (`21`/`23` cột), `ImportManifest` đối soát, `QuarantineRow`, idempotent retry & late-batch guard. *(Không có O1).* | `S2` (`P3` dữ liệu) |
+| 3 | `ingestion` | Validate `2` CSV UTF-8 cơ sở (`21`/`23` cột), `ImportManifest` đối soát, staging `ImportRecord`, `QuarantineRow`, idempotent retry & late-batch guard. *(Không có O1).* | `S2` (`P3` dữ liệu) |
 | 4 | `policy` | `AuthorityEntry` (`5` lớp), `PolicyVersion`, `CriticalField`, `PolicyLifecycleEvent`, `governing_date` giờ VN, tính toán ngưỡng & `DAT 05` Conflict Hold. | `S3` (`P2` duyệt) |
 | 5 | `retrieval` | Chuẩn hóa query tiếng Việt, từ điển viết tắt CRM (`VIETNAMESE_CRM_SYNONYMS`), Pre-filtered Hybrid Search (`pgvector` + `unaccent` + `pg_trgm` RRF). | `S3` |
 | 6 | `answer` | Điều phối Pipeline `5` tầng, phát hiện ngoài phạm vi (`ANS 07`), giữ nguyên `task_id` khi `follow-up`/`regenerate`, trả `AnswerPackage` `7` phần. | `S3` |
@@ -252,7 +254,7 @@ sequenceDiagram
         Ing-->>API: Phân loại accepted_rows vs quarantine_issues (DAT 08 / OPS 04)
         API->>Worker: Dispatch run_batch_import(batch_id, source_type, batch_type)
         Worker->>DB: Kiểm tra idempotency_key (chống trùng khi retry) & late-batch guard (không ghi đè bản mới hơn)
-        Worker->>DB: Upsert / Tombstone dòng hợp lệ; lưu ImportManifest & QuarantineRow kèm reason_code
+        Worker->>DB: Stage dòng hợp lệ trong import_records; lưu ImportManifest & QuarantineRow kèm reason_code
         Worker->>Worker: Kích hoạt index_passages cho các đoạn được duyệt tạo Vector(1536) vào passage_embeddings
         Worker-->>Steward: Hoàn tất batch <= 30 phút (OPS 01) kèm Snapshot Age mới
     end

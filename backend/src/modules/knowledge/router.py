@@ -42,8 +42,9 @@ async def get_document_lineage(
 
 @router.get("/snapshot-age", response_model=SnapshotAgeResponse)
 async def get_snapshot_age(
+    db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> SnapshotAgeResponse:
     """Report current corpus snapshot age for evidence banners."""
     _ = current_user
-    return service.compute_snapshot_age(last_import_at=None)
+    return await service.get_latest_snapshot_age(db)

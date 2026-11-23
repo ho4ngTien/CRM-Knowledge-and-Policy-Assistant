@@ -1,9 +1,9 @@
-"""Pydantic schemas for critical fields, governing-date applicability, and authority tiers."""
+"""Pydantic schemas for critical fields, governing-date applicability, and authority tiers [CKPA-17]."""  # noqa: E501
 
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.shared.enums import (
     AuthorityTier,
@@ -15,7 +15,12 @@ from src.shared.enums import (
 
 
 class CriticalFieldItem(BaseModel):
-    """Typed structured policy parameter rendered deterministically by UI & validation."""
+    """Typed structured policy parameter rendered deterministically by UI & validation.
+
+    Strictly frozen under Gate G1, SRS Mục 4.3, SRS-FR-06.1 [CKPA-17].
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     field_id: str
     policy_id: str

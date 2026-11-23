@@ -91,9 +91,7 @@ class LLMGenerationResult:
 class PolicyGatePort(Protocol):
     """Layer 2 port for VN governing date, applicability conflict hold, and critical fields."""
 
-    def resolve_governing_date_vn(
-        self, requested_date: date | None
-    ) -> tuple[date, bool, bool]: ...
+    def resolve_governing_date_vn(self, requested_date: date | None) -> tuple[date, bool, bool]: ...
 
     def evaluate_policy_gate(
         self,
@@ -130,6 +128,7 @@ class RetrievalPort(Protocol):
         self,
         user: AuthenticatedUser,
         passage_ids: list[str],
+        db: object | None = None,
     ) -> dict[str, PassageSummary]: ...
 
 
