@@ -107,6 +107,7 @@ class RecordAction(StrEnum):
 
     UPSERT = "upsert"
     TOMBSTONE = "tombstone"
+    DELETE = "delete"
 
 
 class CriticalFieldType(StrEnum):

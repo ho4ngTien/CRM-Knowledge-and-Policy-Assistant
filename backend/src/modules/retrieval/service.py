@@ -4,7 +4,10 @@ import re
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import select
+
 from src.config import settings
+from src.modules.knowledge.models import DocumentVersion, Passage
 from src.modules.knowledge.schemas import PassageSummary
 from src.modules.retrieval.models import (
     VIETNAMESE_CRM_SYNONYMS,
@@ -102,7 +105,7 @@ class RetrievalService:
         top_k: int | None = None,
     ) -> list[PassageSummary]:
         """Enforce RBAC (SEC 01) and strict 7 lifecycle states (KNW 03) BEFORE ranking.
-        
+
         Zero percent leakage guarantee:
         - 4 RBAC Roles: reader, policy_owner, steward, administrator
         - 7 KNW 03 States:
@@ -256,9 +259,38 @@ class RetrievalService:
         self,
         user: AuthenticatedUser,
         passage_ids: list[str],
+        db: object | None = None,
     ) -> dict[str, PassageSummary]:
         """Re-fetch live authoritative passage state for Layer 5 post-generation verification."""
-        # TODO(G1): Query current PostgreSQL Passage + DocumentVersion rows for passage_ids
-        # and enforce audience filtering before Layer 5 verify_final_delivery (Worked Case 9).
-        _ = user, passage_ids
-        return {}
+        if db is None:
+            return {}
+        stmt = (
+            select(Passage, DocumentVersion)
+            .join(DocumentVersion, Passage.document_version_id == DocumentVersion.id)
+            .where(Passage.id.in_(passage_ids))
+        )
+        rows = (await db.execute(stmt)).all()  # type: ignore[attr-defined]
+        authoritative: dict[str, PassageSummary] = {}
+        for passage, version in rows:
+            audiences = [item.strip() for item in passage.audience.split(",") if item.strip()]
+            if not check_policy_audience(user, audiences):
+                continue
+            authoritative[passage.id] = PassageSummary(
+                passage_id=passage.id,
+                document_id=passage.document_id,
+                document_version_id=passage.document_version_id,
+                title=passage.title,
+                content=passage.content,
+                source_ref=passage.source_ref,
+                page_number=passage.page_number,
+                clause_ref=passage.clause_ref,
+                language=passage.language,
+                scope=passage.scope,
+                audience=audiences,
+                status=PolicyLifecycleStatus(passage.status),
+                has_essential_attachments=passage.has_essential_attachments,
+                effective_from=version.effective_from,
+                effective_to=version.effective_to,
+                supersedes=version.supersedes_version_id,
+            )
+        return authoritative

@@ -67,6 +67,18 @@ class Passage(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default="draft", nullable=False, index=True)
     has_essential_attachments: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_tombstoned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    tombstoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    tombstone_batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    withdrawn_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    withdrawal_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_batch_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source_recorded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class PassageEmbedding(TimestampMixin, Base):
@@ -78,6 +90,4 @@ class PassageEmbedding(TimestampMixin, Base):
         String(64), ForeignKey("passages.id", ondelete="CASCADE"), primary_key=True
     )
     embedding_model: Mapped[str] = mapped_column(String(128), nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(
-        Vector(settings.EMBEDDING_DIM), nullable=False
-    )
+    embedding: Mapped[list[float]] = mapped_column(Vector(settings.EMBEDDING_DIM), nullable=False)

@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     IMPORT_OUTPUT_DIR: str = "data/output"
     IMPORT_MAX_ROWS_PER_BATCH: int = 500
     IMPORT_SNAPSHOT_STALENESS_HOURS: int = 25
+    ENABLE_O1_CONTEXT_IMPORT: bool = False
 
     CACHE_WITHDRAWAL_MAX_SECONDS: int = 300
     EMERGENCY_DISABLE_CACHE_KEY: str = "ckpa:emergency_disable"
@@ -95,9 +96,7 @@ class Settings(BaseSettings):
         db_lower = self.DATABASE_URL.lower()
         storage_lower = self.IMPORT_OUTPUT_DIR.lower()
         if not self.ISOLATED_VPC_NETWORK.strip() or "prod" in self.ISOLATED_VPC_NETWORK.lower():
-            raise ValueError(
-                "SEC 06 violation: VPC network must be isolated from production."
-            )
+            raise ValueError("SEC 06 violation: VPC network must be isolated from production.")
 
         if env_norm == "production":
             if (

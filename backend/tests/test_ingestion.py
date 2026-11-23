@@ -3,6 +3,7 @@
 import csv
 import hashlib
 import io
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,10 @@ from src.modules.ingestion.service import (
     PASSAGES_CSV_COLUMNS,
     IdempotencyKeyConflict,
     IngestionService,
+    StaleBatchRejected,
 )
+from src.modules.knowledge.models import Document, DocumentVersion, Passage
+from src.modules.policy.models import CriticalField
 from src.shared.enums import BatchType
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -226,6 +230,10 @@ async def test_import_persists_accepted_rows_manifest_and_quarantine() -> None:
         ImportManifest.__table__,
         ImportRecord.__table__,
         QuarantineRow.__table__,
+        CriticalField.__table__,
+        Document.__table__,
+        DocumentVersion.__table__,
+        Passage.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
     with Session(engine) as session:
@@ -285,7 +293,15 @@ async def test_import_rejects_idempotency_key_reuse_with_different_content() -> 
     raw_bytes = (FAMILY1 / "Critical_Fields_Family1.csv").read_bytes()
     manifest_bytes = (FAMILY1 / "Source_URI_And_Checksum_Manifest_Family1.csv").read_bytes()
     engine = create_engine("sqlite+pysqlite:///:memory:")
-    tables = [ImportBatch.__table__, ImportManifest.__table__, ImportRecord.__table__]
+    tables = [
+        ImportBatch.__table__,
+        ImportManifest.__table__,
+        ImportRecord.__table__,
+        Document.__table__,
+        DocumentVersion.__table__,
+        Passage.__table__,
+        CriticalField.__table__,
+    ]
     Base.metadata.create_all(engine, tables=tables)
     with Session(engine) as session:
         db = _AsyncSessionAdapter(session)
@@ -311,3 +327,159 @@ async def test_import_rejects_idempotency_key_reuse_with_different_content() -> 
                 idempotency_key="already-used",
                 submitted_by="CKPA-52",
             )
+
+
+@pytest.mark.asyncio
+async def test_full_snapshot_partial_apply_and_quarantined_lkg_is_preserved() -> None:
+    headers, rows = _read_csv((FAMILY1 / "Policy_Corpus_Family1.csv").read_bytes())
+    rows[0]["content"] = "accepted replacement"
+    rows[1]["has_essential_attachments"] = "false"
+    raw_bytes = _serialize_csv(tuple(headers), rows)
+    manifest = _manifest_for(rows, "passages")
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    tables = [
+        ImportBatch.__table__,
+        ImportManifest.__table__,
+        ImportRecord.__table__,
+        QuarantineRow.__table__,
+        Document.__table__,
+        DocumentVersion.__table__,
+        Passage.__table__,
+    ]
+    Base.metadata.create_all(engine, tables=tables)
+    with Session(engine) as session:
+        db = _AsyncSessionAdapter(session)
+        original = Passage(
+            id=rows[1]["passage_id"],
+            document_id="DOC-OLD",
+            document_version_id="VER-OLD",
+            title="last-known-good",
+            content="preserved",
+            source_ref="data/g1/old.md",
+            page_number=1,
+            clause_ref="OLD",
+            language="vi",
+            scope="company:SN",
+            audience="reader",
+            status="effective",
+            has_essential_attachments=True,
+            is_tombstoned=False,
+        )
+        session.add(original)
+        session.commit()
+
+        report = await SERVICE.import_csv_bytes(
+            db,
+            raw_bytes,
+            source_type="passages",
+            batch_type=BatchType.FULL_SNAPSHOT,
+            expected_rows=len(rows),
+            manifest_bytes=manifest,
+            idempotency_key="partial-full-snapshot",
+            submitted_by="CKPA-59",
+            batch_timestamp=datetime(2026, 11, 23, 10, 0, tzinfo=UTC),
+        )
+
+        preserved = session.get(Passage, rows[1]["passage_id"])
+        assert report.accepted_rows + report.quarantined_rows == report.expected_rows
+        assert report.quarantined_rows >= 1
+        assert preserved is not None
+        assert preserved.content == "preserved"
+        assert preserved.is_tombstoned is False
+
+
+@pytest.mark.asyncio
+async def test_stale_batch_is_rejected_before_authoritative_apply() -> None:
+    raw_bytes = (FAMILY1 / "Critical_Fields_Family1.csv").read_bytes()
+    manifest_bytes = (FAMILY1 / "Source_URI_And_Checksum_Manifest_Family1.csv").read_bytes()
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    tables = [
+        ImportBatch.__table__,
+        ImportManifest.__table__,
+        ImportRecord.__table__,
+        QuarantineRow.__table__,
+        CriticalField.__table__,
+    ]
+    Base.metadata.create_all(engine, tables=tables)
+    with Session(engine) as session:
+        db = _AsyncSessionAdapter(session)
+        await SERVICE.import_csv_bytes(
+            db,
+            raw_bytes,
+            source_type="critical_fields",
+            batch_type=BatchType.FULL_SNAPSHOT,
+            expected_rows=16,
+            manifest_bytes=manifest_bytes,
+            idempotency_key="current-batch",
+            submitted_by="CKPA-59",
+            batch_timestamp=datetime(2026, 11, 23, 10, 0, tzinfo=UTC),
+        )
+
+        with pytest.raises(StaleBatchRejected):
+            await SERVICE.import_csv_bytes(
+                db,
+                raw_bytes,
+                source_type="critical_fields",
+                batch_type=BatchType.FULL_SNAPSHOT,
+                expected_rows=16,
+                manifest_bytes=manifest_bytes,
+                idempotency_key="stale-batch",
+                submitted_by="CKPA-59",
+                batch_timestamp=datetime(2026, 11, 23, 9, 0, tzinfo=UTC),
+            )
+
+
+@pytest.mark.asyncio
+async def test_delta_missing_rows_are_not_tombstoned() -> None:
+    headers, rows = _read_csv((FAMILY1 / "Policy_Corpus_Family1.csv").read_bytes())
+    raw_bytes = _serialize_csv(tuple(headers), rows[:1])
+    manifest = _manifest_for(rows[:1], "passages")
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    tables = [
+        ImportBatch.__table__,
+        ImportManifest.__table__,
+        ImportRecord.__table__,
+        QuarantineRow.__table__,
+        Document.__table__,
+        DocumentVersion.__table__,
+        Passage.__table__,
+    ]
+    Base.metadata.create_all(engine, tables=tables)
+    with Session(engine) as session:
+        db = _AsyncSessionAdapter(session)
+        existing = Passage(
+            id="PAS-MISSING",
+            document_id="DOC-001",
+            document_version_id="VER-001",
+            title="must remain active",
+            content="active",
+            source_ref="data/g1/source.md",
+            page_number=1,
+            clause_ref="OLD",
+            language="vi",
+            scope="company:SN",
+            audience="reader",
+            status="effective",
+            has_essential_attachments=True,
+            is_tombstoned=False,
+        )
+        session.add(existing)
+        session.commit()
+
+        await SERVICE.import_csv_bytes(
+            db,
+            raw_bytes,
+            source_type="passages",
+            batch_type=BatchType.DELTA,
+            expected_rows=1,
+            manifest_bytes=manifest,
+            idempotency_key="delta-no-auto-tombstone",
+            submitted_by="CKPA-59",
+            batch_timestamp=datetime(2026, 11, 23, 10, 0, tzinfo=UTC),
+        )
+
+        remaining = session.get(Passage, "PAS-MISSING")
+        assert remaining is not None
+        assert remaining.is_tombstoned is False

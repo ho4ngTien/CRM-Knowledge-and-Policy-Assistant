@@ -312,9 +312,15 @@ erDiagram
 - **Định dạng mã hóa:** Bắt buộc UTF-8 (`utf-8` hoặc `utf-8-sig`); cấm TCVN3, VNI-Windows, Windows-1258.
 - **Tần suất & Trần khối lượng:** Tối đa `1` batch/ngày/schema, tối đa **`500` dòng** thay đổi/batch (`IMPORT_MAX_ROWS_PER_BATCH=500`).
 - **Tách biệt `full_snapshot` vs `delta` (`BatchType`):** Mỗi batch phải ghi rõ `batch_type` và `idempotency_key` duy nhất; xuất `ImportManifest` bảo toàn cân bằng `expected_rows` vs `accepted_rows + rejected_rows + quarantined_rows`.
-- **Idempotency & Late-Batch Guard:** Chạy lại cùng `idempotency_key` không sinh bản ghi trùng; batch có `batch_timestamp` / `recorded_at` cũ hơn phiên bản đang lưu không được phép ghi đè dữ liệu mới hơn (`DAT 02`).
+- **Partial Apply Full-Snapshot (`DAT 02`):** Các dòng `accepted` được upsert vào trạng thái chuẩn. Các dòng `quarantined` không ghi đè bản ghi chuẩn; nếu ID đã tồn tại, giữ nguyên bản `last-known-good` cũ. Toàn lô vẫn bảo toàn `expected_rows = accepted_rows + quarantined_rows`.
+- **Tombstone trong Full-Snapshot:** Chỉ tombstone bản ghi `active` thuộc họ/`scope` của lô và vắng mặt hoàn toàn trong file CSV mới, đồng thời không nằm trong danh sách lỗi/ID quarantine của lô. Không tombstone theo dòng bị thiếu ID hoặc dòng lỗi định dạng ID.
+- **Tombstone trong Delta:** Không tombstone bản ghi vắng mặt. Chỉ thực thi xóa mềm khi dòng CSV có `record_action = tombstone` hoặc `delete` tường minh.
+- **Idempotency & Late-Batch Guard:** Chạy lại cùng `idempotency_key` và cùng SHA-256 payload là no-op và trả kết quả batch cũ. Cùng key nhưng payload khác trả `409 Conflict`.
+- **Mốc thứ tự lô:** Dùng `batch_timestamp` UTC+7/ISO-8601 do nguồn xuất bản; không dùng `source_recorded_at`/`recorded_at` để so sánh batch muộn. Nếu `incoming.batch_timestamp < current.last_batch_timestamp` thì bỏ qua batch. Nếu bằng nhau, chỉ cập nhật khi ID phiên bản `document_version_id/policy_version_id` có bằng chứng cao hơn; nếu không có, từ chối cập nhật.
 - **Xóa tường minh (`Tombstone`):** Thiếu dòng trong CSV tuyệt đối không tự hiểu là lệnh xóa; xóa hợp lệ phải dùng `record_action = "tombstone"` hoặc đối soát `full_snapshot` đã duyệt.
+- **Snapshot Age:** `snapshot_age_seconds = now_utc - latest_committed_batch_timestamp`; age tính theo timestamp batch đã commit, không tính thời gian server nhận file.
 - **Tách biệt `O1` (`DAT 07`):** Không tồn tại CSV template thứ `3` cho ngữ cảnh khách hàng trong Base Scope.
+- **Feature flag O1:** `ENABLE_O1_CONTEXT_IMPORT=false` mặc định. Khi tắt, API O1 trả `403 O1_OPTION_DISABLED_IN_BASE_SCOPE`; không nạp hồ sơ khách hàng. Khi bật phải dùng validator O1 riêng, context allowlist, trần 2.000 dòng và bảng riêng ngoài bảng tri thức chính sách. Trạng thái mua O1 cần S1/Purchaser xác nhận trước khi thay đổi `.env`.
 - **Kiểm chứng checksum & quarantine:** Khi gửi manifest G1, validator đối chiếu SHA-256 theo đúng canonical field set của `data/g1/scripts/validate_g1_repo.ps1`. Dòng hợp lệ được lưu vào `import_records` theo batch; dòng lỗi giữ nguyên payload trong `quarantine_rows`. Đây là vùng staging, không tự phát hành bản ghi vào retrieval.
 - **Nạp có kiểm soát:** `POST /api/v1/ingestion/csv/import` yêu cầu `idempotency_key` và manifest checksum. Nạp lại cùng key/cùng nội dung trả lại cùng batch; dùng lại key với nội dung khác trả `409`.
 
