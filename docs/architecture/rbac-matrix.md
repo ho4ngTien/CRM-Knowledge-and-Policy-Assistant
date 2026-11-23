@@ -13,7 +13,7 @@ Tài liệu này xác lập hợp đồng kỹ thuật bất biến (immutable c
 1. **Khóa cứng danh sách endpoint `/api/v1/*`** cho toàn bộ 12 module backend theo kiến trúc Modular Monolith.
 2. **Khóa cứng cấu trúc JSON 7 phần** của `AnswerPackage` theo chuẩn kiểm chứng an toàn (ANS 01, ANS 03, SRS-FR-06.1).
 3. **Chốt ma trận phân quyền RBAC tối thiểu cho 8 vai trò RFP/SRS** bảo đảm nguyên tắc đặc quyền tối thiểu (Least Privilege) và bức tường ngăn cách (Chinese Wall).
-4. **Thống nhất cấu hình môi trường LLM** giữa backend (`backend/src/config.py`), S4 client (`app/config.py`) và biến môi trường mẫu (`.env.example`).
+4. **Thống nhất cấu hình môi trường LLM** với nguồn thẩm quyền cho G0/G1 là backend (`backend/src/config.py`) và biến môi trường mẫu (`.env.example`); tham số của S4 prototype lưu trữ (`legacy/s4/config.py`) chỉ mang tính đối chiếu lịch sử, nằm ngoài runtime G0/G1.
 5. **Ký duyệt Gate G0** giữa Squad B và Squad C trước khi triển khai chi tiết Phase G1.
 
 ---
@@ -185,9 +185,9 @@ Hệ thống định nghĩa chính xác 8 vai trò RFP tại `backend/src/shared
 
 ## 5. THỐNG NHẤT CẤU HÌNH MÔI TRƯỜNG LLM
 
-Các tham số giới hạn mô hình LLM được chốt đồng bộ giữa backend (`backend/src/config.py`), S4 application (`app/config.py`) và template môi trường (`.env.example`):
+Đối với runtime G0/G1 hiện hành, **`backend/src/config.py`** và **`.env.example`** là nguồn cấu hình có thẩm quyền (authoritative). Cột `legacy/s4/config.py` dưới đây chỉ ghi nhận đối chiếu lịch sử của S4 prototype đã lưu trữ (archived, nằm ngoài luồng runtime G0/G1):
 
-| Tham số cấu hình | Giá trị khóa cứng | Backend (`backend/src/config.py`) | Ứng dụng S4 (`app/config.py`) | Ghi chú quy chuẩn RFP / SRS |
+| Tham số cấu hình | Giá trị khóa cứng | Backend (`backend/src/config.py`) — Authoritative G0/G1 | Archived S4 prototype (`legacy/s4/config.py`, tham khảo) | Ghi chú quy chuẩn RFP / SRS |
 |:---|:---:|:---:|:---:|:---|
 | **Max Input Tokens** | `6000` | `LLM_MAX_INPUT_TOKENS = 6000` | `MAX_INPUT_TOKENS = 6000` | Giới hạn budget prompt tiếng Việt bảo thủ |
 | **Max Output Tokens** | `900` | `LLM_MAX_OUTPUT_TOKENS = 900` | `MAX_OUTPUT_TOKENS = 900` | Tối đa 250 từ giải thích + trích dẫn |
