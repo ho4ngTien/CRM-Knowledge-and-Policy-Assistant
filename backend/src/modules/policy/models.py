@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db import Base, TimestampMixin
@@ -86,6 +86,19 @@ class CriticalField(TimestampMixin, Base):
     scope: Mapped[str] = mapped_column(String(500), nullable=False)
     audience: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="draft", nullable=False, index=True)
+    is_tombstoned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    tombstoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    tombstone_batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    withdrawn_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    withdrawal_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_batch_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source_recorded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class PolicyLifecycleEvent(TimestampMixin, Base):

@@ -1,9 +1,12 @@
 """Admin lifecycle approval, instant withdrawal, and Base Scope ops service."""
 
-from datetime import datetime
+import logging
+from datetime import UTC, datetime
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
+from celery import Celery
+from kombu.exceptions import KombuError
 from sqlalchemy import update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -104,6 +107,7 @@ class AdminService:
 
         prev_status = version.status
         version.status = PolicyLifecycleStatus.WITHDRAWN.value
+        withdrawn_at = datetime.now(UTC)
 
         await db.execute(
             update(DocumentVersion)
@@ -113,12 +117,22 @@ class AdminService:
         await db.execute(
             update(Passage)
             .where(Passage.document_version_id == version.document_version_id)
-            .values(status=PolicyLifecycleStatus.WITHDRAWN.value)
+            .values(
+                status=PolicyLifecycleStatus.WITHDRAWN.value,
+                withdrawn_at=withdrawn_at,
+                withdrawn_by=user.user_id,
+                withdrawal_reason=reason,
+            )
         )
         await db.execute(
             update(CriticalField)
             .where(CriticalField.policy_version_id == policy_version_id)
-            .values(status=PolicyLifecycleStatus.WITHDRAWN.value)
+            .values(
+                status=PolicyLifecycleStatus.WITHDRAWN.value,
+                withdrawn_at=withdrawn_at,
+                withdrawn_by=user.user_id,
+                withdrawal_reason=reason,
+            )
         )
 
         stmt = (
@@ -127,9 +141,7 @@ class AdminService:
                 AnswerPackageRecord.id.in_(
                     AnswerCitationRecord.__table__.select()
                     .with_only_columns(AnswerCitationRecord.answer_package_id)
-                    .where(
-                        AnswerCitationRecord.document_version_id == version.document_version_id
-                    )
+                    .where(AnswerCitationRecord.document_version_id == version.document_version_id)
                 )
             )
             .values(is_stale=True)
@@ -149,11 +161,24 @@ class AdminService:
         await db.commit()
 
         if cache_purger is not None:
-            await cache_purger.purge_policy_caches(
-                policy_version_id, version.document_version_id
-            )
-        # TODO(G1): Enqueue Celery cache-purge task within CACHE_WITHDRAWAL_MAX_SECONDS
-        # when cache_purger is None.
+            await cache_purger.purge_policy_caches(policy_version_id, version.document_version_id)
+        else:
+            try:
+                purge_app = Celery(
+                    "ckpa-withdrawal-purge",
+                    broker=settings.CELERY_BROKER_URL,
+                    backend=settings.CELERY_RESULT_BACKEND,
+                )
+                purge_app.send_task(
+                    "src.tasks.index_task.withdraw_and_purge_cache",
+                    args=(policy_version_id, version.document_version_id),
+                )
+            except KombuError as exc:
+                logging.getLogger(__name__).warning(
+                    "withdrawal_cache_purge_enqueue_failed",
+                    exc_info=exc,
+                    extra={"policy_version_id": policy_version_id},
+                )
 
         stale_rowcount = cast(CursorResult[Any], stale_result).rowcount
         return InstantWithdrawalResponse(

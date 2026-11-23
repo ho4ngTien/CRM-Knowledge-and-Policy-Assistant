@@ -44,5 +44,6 @@ class SnapshotAgeResponse(BaseModel):
 
     last_successful_import_at: datetime | None = None
     snapshot_age_hours: float | None = None
+    snapshot_age_seconds: int | None = None
     staleness_threshold_hours: int
     is_stale: bool

@@ -6,6 +6,7 @@ import io
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from typing import cast
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -24,6 +25,8 @@ from src.modules.ingestion.schemas import (
     QuarantineIssue,
     QuarantineItemResponse,
 )
+from src.modules.knowledge.models import Document, DocumentVersion, Passage
+from src.modules.policy.models import CriticalField
 from src.shared.enums import (
     BatchType,
     ComparisonOperator,
@@ -157,6 +160,10 @@ class IdempotencyKeyConflict(Exception):
     """Raised when an import idempotency key is reused for different content."""
 
 
+class StaleBatchRejected(Exception):
+    """Raised when an incoming batch is older than the authoritative state."""
+
+
 class IngestionService:
     """Validates, isolates, and stages Base Scope 2-CSV imports."""
 
@@ -189,6 +196,7 @@ class IngestionService:
         manifest_bytes: bytes,
         idempotency_key: str,
         submitted_by: str,
+        batch_timestamp: datetime | None = None,
     ) -> CsvValidationReport:
         """Persist accepted rows, manifest counts, and quarantined raw rows as one batch."""
         validated = self._validate_batch(
@@ -220,9 +228,36 @@ class IngestionService:
                 }
             )
 
+        effective_batch_timestamp = batch_timestamp or datetime.now(ZoneInfo(settings.APP_TIMEZONE))
+        latest_batch = (
+            await db.execute(
+                select(ImportBatch)
+                .where(
+                    ImportBatch.source_type == source_type,
+                    ImportBatch.status != "rejected",
+                )
+                .order_by(ImportBatch.batch_timestamp.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if latest_batch is not None:
+            effective_utc = effective_batch_timestamp.astimezone(ZoneInfo("UTC"))
+            latest_utc = latest_batch.batch_timestamp.astimezone(ZoneInfo("UTC"))
+            if effective_utc < latest_utc:
+                raise StaleBatchRejected(
+                    "Incoming batch_timestamp is older than the latest committed batch."
+                )
         batch_id = uuid4().hex
+        applied_rows = await self._apply_authoritative_rows(
+            db,
+            source_type=source_type,
+            batch_type=batch_type,
+            batch_id=batch_id,
+            batch_timestamp=effective_batch_timestamp,
+            validated=validated,
+        )
         report = validated.report.model_copy(
-            update={"batch_id": batch_id, "imported_rows": len(validated.accepted_rows)}
+            update={"batch_id": batch_id, "imported_rows": applied_rows}
         )
         batch = ImportBatch(
             id=batch_id,
@@ -717,6 +752,247 @@ class IngestionService:
     @staticmethod
     def _json_payload(row: dict[str, str | None]) -> dict[str, object]:
         return {key: value for key, value in row.items()}
+
+    async def _apply_authoritative_rows(
+        self,
+        db: AsyncSession,
+        *,
+        source_type: str,
+        batch_type: BatchType,
+        batch_id: str,
+        batch_timestamp: datetime,
+        validated: _ValidatedBatch,
+    ) -> int:
+        """Apply accepted rows, preserve quarantined LKG, and reconcile full-snapshot omissions."""
+        quarantined_ids = {
+            issue.record_id for _, _, issue in validated.quarantined_rows if issue.record_id
+        }
+        applied = 0
+
+        for row_number, row in validated.accepted_rows:
+            record_id = self._record_id(row, source_type)
+            action = (row.get("record_action") or "").strip().lower()
+            model = Passage if source_type == "passages" else CriticalField
+            current = await db.get(model, record_id)
+            current = cast(Passage | CriticalField | None, current)
+
+            incoming_version = (
+                row.get("document_version_id")
+                if source_type == "passages"
+                else row.get("policy_version_id")
+            )
+            if current is not None:
+                current_timestamp = current.last_batch_timestamp
+                if current_timestamp is not None:
+                    if batch_timestamp.astimezone(ZoneInfo("UTC")) < current_timestamp.astimezone(
+                        ZoneInfo("UTC")
+                    ):
+                        continue
+                    if batch_timestamp.astimezone(ZoneInfo("UTC")) == current_timestamp.astimezone(
+                        ZoneInfo("UTC")
+                    ):
+                        current_version = (
+                            current.document_version_id
+                            if source_type == "passages"
+                            else (
+                                current.policy_version_id
+                                if isinstance(current, CriticalField)
+                                else None
+                            )
+                        )
+                        if not self._higher_version(incoming_version, current_version):
+                            continue
+
+            if action in {RecordAction.TOMBSTONE.value, RecordAction.DELETE.value}:
+                if current is not None:
+                    current.is_tombstoned = True
+                    current.status = PolicyLifecycleStatus.WITHDRAWN.value
+                    current.tombstoned_at = batch_timestamp
+                    current.tombstone_batch_id = batch_id
+                    current.last_batch_id = batch_id
+                    current.last_batch_timestamp = batch_timestamp
+                    applied += 1
+                continue
+
+            if source_type == "passages":
+                await self._upsert_passage(db, row, record_id, batch_id, batch_timestamp)
+            else:
+                await self._upsert_critical_field(db, row, record_id, batch_id, batch_timestamp)
+            applied += 1
+
+        if batch_type == BatchType.FULL_SNAPSHOT:
+            model = Passage if source_type == "passages" else CriticalField
+            present_ids = {
+                self._record_id(row, source_type) for _, row in validated.accepted_rows
+            } | quarantined_ids
+            accepted_document_ids = (
+                {row.get("document_id") or "" for _, row in validated.accepted_rows}
+                if source_type == "passages"
+                else set()
+            )
+            accepted_policy_ids = (
+                {row.get("policy_id") or "" for _, row in validated.accepted_rows}
+                if source_type == "critical_fields"
+                else set()
+            )
+            existing_rows = (await db.execute(select(model))).scalars().all()
+            for current in existing_rows:
+                current = cast(Passage | CriticalField, current)
+                if current.id in present_ids or current.is_tombstoned:
+                    continue
+                if self._belongs_to_full_snapshot(
+                    current,
+                    source_type,
+                    document_ids=accepted_document_ids,
+                    policy_ids=accepted_policy_ids,
+                ):
+                    current.is_tombstoned = True
+                    current.status = PolicyLifecycleStatus.WITHDRAWN.value
+                    current.tombstoned_at = batch_timestamp
+                    current.tombstone_batch_id = batch_id
+                    current.last_batch_id = batch_id
+                    current.last_batch_timestamp = batch_timestamp
+                    applied += 1
+
+        return applied
+
+    @staticmethod
+    def _higher_version(incoming: str | None, current: str | None) -> bool:
+        if not incoming or not current:
+            return False
+        incoming_digits = "".join(ch for ch in incoming if ch.isdigit())
+        current_digits = "".join(ch for ch in current if ch.isdigit())
+        if incoming_digits and current_digits:
+            return int(incoming_digits) > int(current_digits)
+        return incoming > current
+
+    @staticmethod
+    def _belongs_to_full_snapshot(
+        current: object,
+        source_type: str,
+        *,
+        document_ids: set[str],
+        policy_ids: set[str],
+    ) -> bool:
+        if source_type == "passages":
+            return bool(document_ids) and getattr(current, "document_id", None) in document_ids
+        return bool(policy_ids) and getattr(current, "policy_id", None) in policy_ids
+
+    async def _upsert_passage(
+        self,
+        db: AsyncSession,
+        row: dict[str, str | None],
+        record_id: str,
+        batch_id: str,
+        batch_timestamp: datetime,
+    ) -> None:
+        current = await db.get(Passage, record_id)
+        recorded_at = self._parse_datetime(row.get("recorded_at"))
+        effective_from = self._parse_datetime(row.get("effective_from"))
+        effective_to = self._parse_datetime(row.get("effective_to"))
+        published_at = self._parse_datetime(row.get("published_at"))
+        document_id = row.get("document_id") or ""
+        document_version_id = row.get("document_version_id") or ""
+        document = await db.get(Document, document_id)
+        if document is None:
+            db.add(
+                Document(
+                    id=document_id,
+                    title=(row.get("title") or "")[:500],
+                    policy_family="policy",
+                    authority_tier="policy",
+                    owner=row.get("owner") or "",
+                    source_ref=row.get("source_ref") or "",
+                )
+            )
+        version = await db.get(DocumentVersion, document_version_id)
+        if version is None:
+            db.add(
+                DocumentVersion(
+                    id=document_version_id,
+                    document_id=document_id,
+                    approver=row.get("approver"),
+                    recorded_at=recorded_at,
+                    published_at=published_at,
+                    effective_from=effective_from,
+                    effective_to=effective_to,
+                    status=row.get("status") or "draft",
+                    supersedes_version_id=row.get("supersedes") or None,
+                )
+            )
+
+        payload = dict(
+            document_id=document_id,
+            document_version_id=document_version_id,
+            title=row.get("title") or "",
+            content=row.get("content") or "",
+            source_ref=row.get("source_ref") or "",
+            page_number=int(row.get("page_number") or "1"),
+            clause_ref=row.get("clause_ref") or "",
+            language=row.get("language") or "vi",
+            scope=row.get("scope") or "",
+            audience=row.get("audience") or "",
+            status=row.get("status") or "draft",
+            has_essential_attachments=(row.get("has_essential_attachments") or "").lower()
+            == "true",
+            is_tombstoned=False,
+            tombstoned_at=None,
+            tombstone_batch_id=None,
+            last_batch_id=batch_id,
+            last_batch_timestamp=batch_timestamp,
+            source_recorded_at=recorded_at,
+        )
+        if current is None:
+            db.add(Passage(id=record_id, **payload))
+        else:
+            for key, value in payload.items():
+                setattr(current, key, value)
+
+    async def _upsert_critical_field(
+        self,
+        db: AsyncSession,
+        row: dict[str, str | None],
+        record_id: str,
+        batch_id: str,
+        batch_timestamp: datetime,
+    ) -> None:
+        current = await db.get(CriticalField, record_id)
+        payload = dict(
+            policy_id=row.get("policy_id") or "",
+            policy_version_id=row.get("policy_version_id") or "",
+            document_version_id=row.get("document_version_id") or "",
+            field_name=row.get("field_name") or "",
+            field_type=row.get("field_type") or "",
+            operator=row.get("operator") or "",
+            value=row.get("value") or "",
+            unit=row.get("unit") or None,
+            currency=row.get("currency") or None,
+            approval_role=row.get("approval_role") or "",
+            time_limit=row.get("time_limit") or None,
+            exception_condition=row.get("exception_condition") or None,
+            required_documents=row.get("required_documents") or None,
+            source_clause=row.get("source_clause") or "",
+            scope=row.get("scope") or "",
+            audience=row.get("audience") or "",
+            status=row.get("status") or "draft",
+            is_tombstoned=False,
+            tombstoned_at=None,
+            tombstone_batch_id=None,
+            last_batch_id=batch_id,
+            last_batch_timestamp=batch_timestamp,
+            source_recorded_at=self._parse_datetime(row.get("effective_from")),
+        )
+        if current is None:
+            db.add(CriticalField(id=record_id, **payload))
+        else:
+            for key, value in payload.items():
+                setattr(current, key, value)
+
+    @staticmethod
+    def _parse_datetime(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
     async def list_quarantine(
         self, db: AsyncSession, *, unresolved_only: bool = True

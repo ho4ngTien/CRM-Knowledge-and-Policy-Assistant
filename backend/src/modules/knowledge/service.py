@@ -3,10 +3,11 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+from src.modules.ingestion.models import ImportBatch
 from src.modules.knowledge.models import Document, DocumentVersion, Passage
 from src.modules.knowledge.schemas import (
     DocumentLineageResponse,
@@ -44,10 +45,7 @@ class KnowledgeService:
             raise AccessDenied("User lacks audience access to this passage.")
         if passage.is_tombstoned or passage.status == PolicyLifecycleStatus.WITHDRAWN.value:
             raise PolicyWithdrawn(f"Passage {passage_id} is withdrawn and cannot be viewed.")
-        if (
-            not allow_historical
-            and passage.status == PolicyLifecycleStatus.SUPERSEDED.value
-        ):
+        if not allow_historical and passage.status == PolicyLifecycleStatus.SUPERSEDED.value:
             raise AccessDenied("Superseded passage requires explicit historical mode.")
         return PassageSummary(
             passage_id=passage.id,
@@ -76,12 +74,16 @@ class KnowledgeService:
         if doc is None:
             raise PolicyNotFound(f"Document {document_id} was not found.")
         versions = (
-            await db.execute(
-                select(DocumentVersion)
-                .where(DocumentVersion.document_id == document_id)
-                .order_by(DocumentVersion.effective_from.desc())
+            (
+                await db.execute(
+                    select(DocumentVersion)
+                    .where(DocumentVersion.document_id == document_id)
+                    .order_by(DocumentVersion.effective_from.desc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return DocumentLineageResponse(
             document_id=doc.id,
             title=doc.title,
@@ -101,9 +103,7 @@ class KnowledgeService:
             ],
         )
 
-    def compute_snapshot_age(
-        self, last_import_at: datetime | None
-    ) -> SnapshotAgeResponse:
+    def compute_snapshot_age(self, last_import_at: datetime | None) -> SnapshotAgeResponse:
         """Compute snapshot staleness against IMPORT_SNAPSHOT_STALENESS_HOURS in VN time."""
         if last_import_at is None:
             return SnapshotAgeResponse(
@@ -123,12 +123,45 @@ class KnowledgeService:
         return SnapshotAgeResponse(
             last_successful_import_at=last_vn,
             snapshot_age_hours=max(age_hours, 0.0),
+            snapshot_age_seconds=max(0, int((now_vn - last_vn).total_seconds())),
             staleness_threshold_hours=settings.IMPORT_SNAPSHOT_STALENESS_HOURS,
             is_stale=age_hours > settings.IMPORT_SNAPSHOT_STALENESS_HOURS,
         )
 
     async def get_latest_snapshot_age(self, db: AsyncSession) -> SnapshotAgeResponse:
         """Query latest completed import timestamp and return VN snapshot freshness."""
-        # TODO(G1): Query latest completed ImportBatch.batch_timestamp from PostgreSQL.
-        _ = db
-        return self.compute_snapshot_age(None)
+        if not hasattr(db, "execute"):
+            return self.compute_snapshot_age(None)
+        latest_timestamp = (
+            await db.execute(
+                select(func.max(ImportBatch.batch_timestamp)).where(
+                    ImportBatch.status != "rejected"
+                )
+            )
+        ).scalar_one_or_none()
+        if latest_timestamp is None:
+            return SnapshotAgeResponse(
+                last_successful_import_at=None,
+                snapshot_age_hours=None,
+                snapshot_age_seconds=None,
+                staleness_threshold_hours=settings.IMPORT_SNAPSHOT_STALENESS_HOURS,
+                is_stale=True,
+            )
+        tz = ZoneInfo(settings.APP_TIMEZONE)
+        last_vn = (
+            latest_timestamp.astimezone(tz)
+            if latest_timestamp.tzinfo is not None
+            else latest_timestamp.replace(tzinfo=tz)
+        )
+        age_seconds = max(
+            0,
+            int((datetime.now(tz) - last_vn).total_seconds()),
+        )
+        age_hours = round(age_seconds / 3600.0, 2)
+        return SnapshotAgeResponse(
+            last_successful_import_at=last_vn,
+            snapshot_age_hours=age_hours,
+            snapshot_age_seconds=age_seconds,
+            staleness_threshold_hours=settings.IMPORT_SNAPSHOT_STALENESS_HOURS,
+            is_stale=age_hours > settings.IMPORT_SNAPSHOT_STALENESS_HOURS,
+        )
