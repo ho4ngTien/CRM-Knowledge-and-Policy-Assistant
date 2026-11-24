@@ -45,7 +45,12 @@ from src.modules.selection.schemas import (
     SelectionResult,
 )
 from src.shared.contracts import PolicyGateDecision
-from src.shared.enums import AuthorityTier, ComparisonOperator, PolicyLifecycleStatus
+from src.shared.enums import (
+    AuthorityTier,
+    ComparisonOperator,
+    CriticalFieldType,
+    PolicyLifecycleStatus,
+)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -309,13 +314,29 @@ class SelectionService:
             missing_ann = [
                 cf.field_id
                 for cf in matching
-                if not cf.source_clause.strip() or not cf.value.strip()
+                if (
+                    not cf.source_clause.strip()
+                    or not cf.value.strip()
+                    or (
+                        cf.field_type
+                        in {
+                            CriticalFieldType.NUMBER,
+                            CriticalFieldType.DURATION,
+                        }
+                        and not (cf.unit or "").strip()
+                    )
+                    or (
+                        cf.field_type == CriticalFieldType.CURRENCY
+                        and not (cf.currency or "").strip()
+                    )
+                )
             ]
             has_missing = len(missing_ann) > 0
             missing_detail: str | None = None
             if has_missing:
                 missing_detail = (
-                    f"DAT 08: {len(missing_ann)} trường thiếu source_clause / value: "
+                    f"DAT 08: {len(missing_ann)} trường thiếu source_clause / value / "
+                    "unit hoặc currency: "
                     + ", ".join(missing_ann[:5])
                     + ("…" if len(missing_ann) > 5 else "")
                 )
@@ -417,6 +438,7 @@ class SelectionService:
         matched_candidates: list[ApplicabilityCandidate] | None = None,
         missing_tables_or_attachments: bool = False,
         missing_attachment_detail: str | None = None,
+        missing_governing_date: bool = False,
     ) -> SelectionHoldDecision:
         """Evaluate all mandatory Hold conditions and return a consolidated decision.
 
@@ -429,6 +451,17 @@ class SelectionService:
         The pipeline MUST NOT call the LLM if ``must_hold`` is True.
         """
         triggers: list[HoldTrigger] = []
+
+        if missing_governing_date:
+            triggers.append(
+                HoldTrigger(
+                    code="DAT04_NO_GOVERNING_DATE",
+                    reason_vi=(
+                        "DAT 04 Hold: Thiếu ngày chi phối bắt buộc; "
+                        "không suy ra ngày hiệu lực từ ngày hệ thống."
+                    ),
+                )
+            )
 
         # Effective applicable version IDs (post 6-dim scope matching when candidates provided)
         effective_version_ids = (
@@ -606,6 +639,7 @@ class SelectionService:
             matched_candidates=matched_candidates if candidates else None,
             missing_tables_or_attachments=missing_tables_or_attachments,
             missing_attachment_detail=missing_attachment_detail,
+            missing_governing_date=requested_date is None,
         )
 
         return SelectionResult(

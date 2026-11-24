@@ -528,7 +528,10 @@ async def test_execute_pipeline_fail_closed_and_five_layer_orchestration() -> No
     )
     answered = await wired_orch.execute_pipeline(
         user,
-        AnswerQueryRequest(question="Chiết khấu 10% cần ai duyệt?"),
+        AnswerQueryRequest(
+            question="Chiết khấu 10% cần ai duyệt?",
+            governing_date=now_vn.date(),
+        ),
         candidates=[candidate],
         critical_fields=[cf],
     )
@@ -548,7 +551,10 @@ async def test_execute_pipeline_fail_closed_and_five_layer_orchestration() -> No
     )
     blocked = await quota_blocked_orch.execute_pipeline(
         user,
-        AnswerQueryRequest(question="Chiết khấu 10% cần ai duyệt?"),
+        AnswerQueryRequest(
+            question="Chiết khấu 10% cần ai duyệt?",
+            governing_date=now_vn.date(),
+        ),
         candidates=[candidate],
         critical_fields=[cf],
     )
@@ -567,7 +573,10 @@ async def test_execute_pipeline_fail_closed_and_five_layer_orchestration() -> No
     )
     wc9_pkg = await wc9_orch.execute_pipeline(
         user,
-        AnswerQueryRequest(question="Chiết khấu 10% cần ai duyệt?"),
+        AnswerQueryRequest(
+            question="Chiết khấu 10% cần ai duyệt?",
+            governing_date=now_vn.date(),
+        ),
         candidates=[candidate],
         critical_fields=[cf],
     )
@@ -585,7 +594,10 @@ async def test_execute_pipeline_fail_closed_and_five_layer_orchestration() -> No
     )
     empty_live_pkg = await empty_live_orch.execute_pipeline(
         user,
-        AnswerQueryRequest(question="Chiết khấu 10% cần ai duyệt?"),
+        AnswerQueryRequest(
+            question="Chiết khấu 10% cần ai duyệt?",
+            governing_date=now_vn.date(),
+        ),
         candidates=[candidate],
         critical_fields=[cf],
     )

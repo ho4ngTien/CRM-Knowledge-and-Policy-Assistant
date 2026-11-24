@@ -628,6 +628,7 @@ class TestRunSelectionIntegration:
             dimensions=default_dimensions,
             all_critical_fields=[cf],
             gate_decision=gate,
+            requested_date=TODAY_VN,
         )
 
         assert isinstance(result, SelectionResult)

@@ -126,6 +126,11 @@ class PolicyService:
                 "DAT 04 Hold: Không tìm thấy phiên bản chính sách hiệu lực cho ngày chi phối; "
                 "cần chuyển chủ sở hữu chính sách."
             )
+        if requested_date is None:
+            hold_reason = (
+                "DAT 04 Hold: Thiếu ngày chi phối bắt buộc; "
+                "không suy ra ngày hiệu lực từ ngày hệ thống."
+            )
 
         return PolicyGateDecision(
             governing_date=applicability.governing_date,
@@ -134,7 +139,11 @@ class PolicyService:
             is_future_preview=applicability.is_future_preview,
             applicable_version_ids=applicable_ids,
             has_conflict=applicability.has_conflict,
-            can_proceed=bool(applicable_ids) and not applicability.has_conflict,
+            can_proceed=(
+                requested_date is not None
+                and bool(applicable_ids)
+                and not applicability.has_conflict
+            ),
             hold_reason=hold_reason,
             critical_fields=filtered_fields,
             snapshot_age_hours=snapshot_age_hours,
