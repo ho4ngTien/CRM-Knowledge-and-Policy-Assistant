@@ -16,14 +16,17 @@
 
 | Kiểm tra | Kết quả |
 |---|---|
-| `python -m pytest -q` trong `backend` | **151 passed, 0 failed**, exit code 0; 1 Starlette/httpx deprecation warning |
-| `ruff check src tests migrations` và `git diff --check` | **PASS**, exit code 0 |
-| `mypy src` | **PASS**, 76 source files, exit code 0 |
-| Migration trên PostgreSQL cô lập | **PASS**: `stamp base` → `upgrade head`; `downgrade base` → `upgrade head`; `alembic check` báo `No new upgrade operations detected` |
-| PostgreSQL/Redis cho bộ test | Docker daemon hoạt động; PostgreSQL và Redis cô lập; ca KnowledgeService dùng PostgreSQL; ca purge gọi worker thật và Redis thật |
-| [GitHub Actions trên PR #33](https://github.com/ho4ngTien/CRM-Knowledge-and-Policy-Assistant/actions/runs/45452559523) | **FAIL**, exit code 1: 2 failed, 149 passed; test DB/Redis từ chối kết nối `localhost:5432` / `localhost:6379` |
+| Tag `v0.2.0-g1-offline` (`0703568`), `pytest -q` | **99 passed, 0 failed**, exit code 0; 1 deprecation warning. Tag không chứa file regression CKPA-75 mới. |
+| Tag `v0.2.0-g1-offline`, migration từ DB PostgreSQL trống | **FAIL**, exit code 1: revision `20261123_01` báo `relation "passages" does not exist`; DB tạm đã được xóa sau phép thử. |
+| Patch PR #33 (`98a1c24`), `python -m pytest -q` | **151 passed, 0 failed**, exit code 0; 1 Starlette/httpx deprecation warning, khi PostgreSQL/Redis đang chạy. |
+| Patch PR #33, migration PostgreSQL trống và round-trip | **PASS**: `upgrade head`; `alembic check`; `downgrade base` → `upgrade head`; `alembic check`; DB tạm đã được xóa. |
+| Patch PR #33, `ruff check src tests migrations`, `git diff --check`, `mypy src` | **PASS**, exit code 0; Mypy kiểm tra 76 source files. |
+| PostgreSQL/Redis local | Docker daemon hoạt động; test SEC 05 truy cập PostgreSQL và gọi worker purge trên Redis thật. |
+| [GitHub Actions PR #33, run 45453913931](https://github.com/ho4ngTien/CRM-Knowledge-and-Policy-Assistant/actions/runs/45453913931) | **FAIL**, exit code 1: 2 failed, 149 passed; PostgreSQL/Redis từ chối kết nối `localhost:5432` / `localhost:6379`. |
 
-OPS 01 dùng harness benchmark hiện có, chạy trên SQLite in-memory; kết quả kiểm thử không được diễn giải thành benchmark PostgreSQL hoặc môi trường production.
+Các lượt tag và patch được chạy ở worktree riêng để tránh lẫn mã nguồn. Lượt chạy được thực hiện theo yêu cầu đối chiếu của S4; đây là bằng chứng thực thi để S4 xem xét, không phải chữ ký nghiệm thu thay S4.
+
+OPS 01 dùng harness benchmark hiện có trên SQLite in-memory; kết quả không phải benchmark PostgreSQL hoặc môi trường production.
 
 ## Defect register — bàn giao SUB24 / CKPA-76
 
@@ -57,21 +60,28 @@ Các mục dưới đây là defect CI/kiểm định có bằng chứng tái hi
 - **Tác động:** chưa chứng minh checksum mismatch bị từ chối/cách ly và không làm thay đổi Last Known Good.
 - **Việc cần làm:** sửa checksum của một record trong manifest, chạy import, xác nhận kết quả quarantine/reject đúng hợp đồng và so sánh dữ liệu LKG trước/sau không đổi.
 
+### DEF-CKPA75-05 — Tag v0.2.0 không bootstrap được PostgreSQL DB trống
+
+- **Mức độ đề xuất:** P1 — blocker khởi tạo DB cho artifact đóng băng; không tự phân loại là Critical Control.
+- **Bằng chứng:** trên commit tag `0703568`, tạo DB PostgreSQL trống rồi chạy `alembic upgrade head`; migration `20261121_01` chạy, nhưng `20261123_01` dừng tại `ALTER TABLE passages ...` với `UndefinedTableError: relation "passages" does not exist`. Lặp lại trên patch PR #33, chuỗi migration nền mới nâng cấp và round-trip thành công.
+- **Tác động:** môi trường mới không thể cài đặt schema bằng migration của tag đóng băng.
+- **Việc cần làm:** không sửa tag đã đóng băng; xác định liệu artifact G1 bắt buộc hỗ trợ DB trống hay dựa vào schema được provision riêng. Với artifact mới, đưa migration schema nền vào bản được review và xác minh trên DB trống.
+
 ## Acceptance blockers — không phân loại là defect sản phẩm
 
-- Tag `v0.2.0-g1-offline` trỏ tới commit `0703568`; file regression CKPA-75 mới không tồn tại trên tag này.
-- Chưa có bằng chứng S4 chạy độc lập full regression/fault injection trên đúng tag và ký SoD. Vì vậy chưa thể kết luận “0 Critical Control” hoặc chốt tổng số defect độc lập.
+- Tag `v0.2.0-g1-offline` trỏ tới commit `0703568`; 99 test hiện có đạt nhưng file regression CKPA-75 mới không tồn tại trên tag. Kết quả 99 test không chứng minh đã chạy đủ ma trận G1/fault injection được yêu cầu.
+- S4 đã yêu cầu chạy đối chiếu tag và patch; quyết định/ký SoD cuối cùng vẫn chờ S4 xem xét các kết quả và defect register.
 - Sau khi PR được review/merge, S4 cần chạy artifact bất biến đúng quy trình. Nếu tiêu chí bắt buộc giữ nguyên tag `v0.2.0-g1-offline`, cần quyết định chính thức về cách xử lý sai khác giữa tag đóng băng và patch mới; không sửa tag đóng băng.
 
 ## Điều kiện còn chờ
 
-1. **Chưa có S4 sign-off độc lập:** các kiểm tra trên chạy trong worktree triển khai, không đáp ứng Separation of Duties.
-2. **Chưa có build/tag phát hành:** patch đã commit `80ab05f` và được mở PR [#33](https://github.com/ho4ngTien/CRM-Knowledge-and-Policy-Assistant/pull/33), hiện chờ review. Chưa tạo `v0.2.1-g1-offline` và không sửa tag đóng băng. Sau khi PR được review/merge, cần tạo artifact/tag bất biến mới để S4 kiểm định độc lập trước khi đóng CKPA-75.
+1. **Chưa có S4 sign-off:** các kết quả so sánh đã được ghi; S4 cần xác nhận verdict, đặc biệt là tag migration FAIL, CI FAIL và các khoảng trống SEC 05/OPS 01.
+2. **Chưa có build/tag phát hành mới:** patch đã commit tới `98a1c24` trên PR [#33](https://github.com/ho4ngTien/CRM-Knowledge-and-Policy-Assistant/pull/33), hiện chờ review. Chưa tạo `v0.2.1-g1-offline` và không sửa tag đóng băng.
 
 ## Quyết định
 
-Các lỗi logic CKPA-75 và blocker bootstrap DB mới đã được xử lý trên patch local; local suite, Ruff, Mypy và xác minh migration đều đạt. Tuy nhiên, CI hiện đỏ và các defect kiểm định nêu trên chưa được đóng. **Chưa thể tuyên bố CKPA-75 hoàn tất/nghiệm thu** cho đến khi:
+Trên patch PR #33, 151 test local, Ruff, Mypy và migration PostgreSQL đều đạt; trên tag đóng băng, 99 test đạt nhưng migration DB trống thất bại. CI PR vẫn đỏ và các defect kiểm định nêu trên chưa đóng. **Chưa thể tuyên bố CKPA-75 đạt 100% hoặc hoàn tất/nghiệm thu** cho đến khi:
 
-- đóng DEF-CKPA75-01..04 hoặc được chấp thuận ngoại lệ có chủ sở hữu;
+- đóng DEF-CKPA75-01..05 hoặc được chấp thuận ngoại lệ có chủ sở hữu;
 - review/merge PR #33 và đưa patch/test vào build bất biến mới;
 - S4 chạy độc lập full regression/fault injection trên đúng build/tag và ký sign-off theo SoD.
