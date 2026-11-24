@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from src.modules.policy.schemas import ApplicabilityCandidate, CriticalFieldItem
@@ -12,8 +12,17 @@ from src.modules.selection.schemas import ScopeDimensions, SelectionResult
 from src.modules.selection.service import SelectionService
 from src.shared.auth import AuthenticatedUser, get_current_user
 from src.shared.contracts import PolicyGateDecision
+from src.shared.enums import UserRole
 
 router = APIRouter(tags=["Selection"])
+
+_FUTURE_PREVIEW_ALLOWED_ROLES: frozenset[UserRole] = frozenset(
+    {
+        UserRole.POLICY_OWNER,
+        UserRole.STEWARD,
+        UserRole.ADMINISTRATOR,
+    }
+)
 
 
 class SelectionRequest(BaseModel):
@@ -53,6 +62,8 @@ class SelectionRequest(BaseModel):
 def _synthesise_gate(
     candidates: list[ApplicabilityCandidate],
     requested_date: date | None,
+    *,
+    allow_future_preview: bool = False,
 ) -> PolicyGateDecision:
     """Synthesise a minimal PolicyGateDecision when the caller omits one."""
     from src.modules.policy.service import PolicyService
@@ -61,6 +72,7 @@ def _synthesise_gate(
     return svc.evaluate_policy_gate(
         candidates,
         requested_date=requested_date,
+        allow_future_preview=allow_future_preview,
     )
 
 
@@ -82,7 +94,20 @@ async def run_selection(
     - Typed critical-field lookup (≤ 50 rows)
     - Mandatory Hold decision (DAT 04/05/08, OPS 03)
     """
-    gate = body.gate_decision or _synthesise_gate(body.candidates, body.requested_date)
+    if body.allow_future_preview and not (current_user.roles & _FUTURE_PREVIEW_ALLOWED_ROLES):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "FUTURE_PREVIEW_FORBIDDEN: Chỉ policy_owner, steward hoặc "
+                "administrator mới được xem trước phiên bản SCHEDULED."
+            ),
+        )
+
+    gate = body.gate_decision or _synthesise_gate(
+        body.candidates,
+        body.requested_date,
+        allow_future_preview=body.allow_future_preview,
+    )
 
     svc = SelectionService()
     result = svc.run_selection(

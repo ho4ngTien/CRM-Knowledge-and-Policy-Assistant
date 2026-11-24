@@ -20,6 +20,7 @@ Acceptance Criteria (G1-AC05, G1-AC06):
 
 from __future__ import annotations
 
+import math
 import re
 import uuid
 from datetime import date, datetime
@@ -338,26 +339,51 @@ class SelectionService:
 
     @staticmethod
     def _parse_decimal(raw: Decimal | float | int | str) -> Decimal:
+        if isinstance(raw, bool):
+            raise ValueError(f"Boolean is not a valid numeric value: {raw}")
         if isinstance(raw, Decimal):
             return raw
+        if isinstance(raw, int):
+            return Decimal(raw)
+        if isinstance(raw, float):
+            if not math.isfinite(raw):
+                raise ValueError(f"Non-finite float is not a valid numeric value: {raw}")
+            return Decimal(str(raw))
         s = str(raw).strip()
         match = re.search(r"[-+]?\d+(?:[.,]\d+)*", s)
         if not match:
             raise ValueError(f"No numeric component found in: {raw}")
         num_str = match.group(0)
 
-        # Clean thousand separators
+        # Clean thousand separators while preserving decimal fractions
         if "," in num_str and "." in num_str:
-            num_str = num_str.replace(",", "")
+            if num_str.rfind(",") > num_str.rfind("."):
+                # Vietnamese / European locale: "1.000.000,50" -> "1000000.50"
+                num_str = num_str.replace(".", "").replace(",", ".")
+            else:
+                # US / UK locale: "1,000,000.50" -> "1000000.50"
+                num_str = num_str.replace(",", "")
         elif "," in num_str:
             parts = num_str.split(",")
-            if len(parts) > 1 and all(len(p) == 3 for p in parts[1:]):
+            int_part = parts[0].lstrip("+-")
+            if (
+                len(parts) > 1
+                and 1 <= len(int_part) <= 3
+                and int_part != "0"
+                and all(len(p) == 3 for p in parts[1:])
+            ):
                 num_str = num_str.replace(",", "")
             else:
                 num_str = num_str.replace(",", ".")
         elif "." in num_str:
             parts = num_str.split(".")
-            if len(parts) > 1 and all(len(p) == 3 for p in parts[1:]):
+            int_part = parts[0].lstrip("+-")
+            if (
+                len(parts) > 1
+                and 1 <= len(int_part) <= 3
+                and int_part != "0"
+                and all(len(p) == 3 for p in parts[1:])
+            ):
                 num_str = num_str.replace(".", "")
 
         return Decimal(num_str)

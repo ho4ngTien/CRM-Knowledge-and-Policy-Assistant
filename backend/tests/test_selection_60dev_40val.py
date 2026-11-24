@@ -30,17 +30,22 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from fastapi.testclient import TestClient
 
 from src.config import settings
+from src.main import app
 from src.modules.policy.schemas import ApplicabilityCandidate
 from src.modules.selection.schemas import (
     ScopeDimensions,
+    SelectionResult,
 )
 from src.modules.selection.service import SelectionService
+from src.shared.auth import AuthenticatedUser, create_access_token
 from src.shared.contracts import PolicyGateDecision
 from src.shared.enums import (
     AuthorityTier,
     PolicyLifecycleStatus,
+    UserRole,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -295,6 +300,40 @@ class TestNumericThresholdArithmeticOPS04:
         assert svc.evaluate_numeric_threshold("==", Decimal("50"), "50 kW") is True
         assert svc.evaluate_numeric_threshold("==", Decimal("15"), "15 ngày làm việc") is True
 
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("0.125", Decimal("0.125")),
+            ("0.500", Decimal("0.500")),
+            ("-0.125", Decimal("-0.125")),
+            ("1.000.000,50", Decimal("1000000.50")),
+            ("1,000,000.50", Decimal("1000000.50")),
+            ("500.000.000", Decimal("500000000")),
+            ("500,000,000", Decimal("500000000")),
+            ("1.500", Decimal("1500")),
+            ("1000.125", Decimal("1000.125")),
+            ("5,5%", Decimal("5.5")),
+            ("5.5", Decimal("5.5")),
+            ("50 kW", Decimal("50")),
+            ("15 ngày làm việc", Decimal("15")),
+            (1.125, Decimal("1.125")),
+            (1e-5, Decimal("0.00001")),
+        ],
+    )
+    def test_parse_decimal_edge_cases(
+        self, svc: SelectionService, raw: float | str, expected: Decimal
+    ):
+        """OPS 04 hardening: primitives, leading-zero decimals, and VN/US locale separators."""
+        assert svc._parse_decimal(raw) == expected
+
+    @pytest.mark.parametrize("bad_raw", [True, False, float("nan"), float("inf")])
+    def test_parse_decimal_rejects_bool_and_non_finite_float(
+        self, svc: SelectionService, bad_raw: bool | float
+    ):
+        """OPS 04 hardening: booleans and non-finite floats must raise ValueError."""
+        with pytest.raises(ValueError):
+            svc._parse_decimal(bad_raw)
+
 
 # ===========================================================================
 # 5. Mandatory Hold Gate on Hold Variant Groups (DAT 05, DAT 08)
@@ -448,27 +487,192 @@ class TestMandatoryHoldVariantGroupsDAT05DAT08:
 
 
 # ===========================================================================
-# 6. Full 60 DEV & 40 VAL Evaluation Loop (Zero Unhandled Open Defects)
+# 6. Router RBAC Enforcement for Future Preview (SEC 01, KNW 03, TAX-11)
 # ===========================================================================
+
+class TestFuturePreviewRouterRBAC:
+    """Enforce RBAC on allow_future_preview=True at POST /api/v1/selection/run."""
+
+    def test_reader_denied_future_preview_with_403(self):
+        """Reader role MUST receive 403 FUTURE_PREVIEW_FORBIDDEN when previewing SCHEDULED."""
+        client = TestClient(app)
+        reader = AuthenticatedUser(
+            user_id="p4-tra-my",
+            email="tra.my@songnhat.vn",
+            roles=frozenset({UserRole.READER}),
+        )
+        token = create_access_token(reader)
+        payload = {
+            "task_id": "RBAC-PREVIEW-READER",
+            "requested_date": "2027-01-15",
+            "dimensions": {"company": "SN", "branch": "all"},
+            "candidates": [],
+            "critical_fields": [],
+            "allow_future_preview": True,
+        }
+        res = client.post(
+            "/api/v1/selection/run",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 403
+        assert "FUTURE_PREVIEW_FORBIDDEN" in res.json()["detail"]
+
+    @pytest.mark.parametrize(
+        "role,user_id,email",
+        [
+            (UserRole.POLICY_OWNER, "p2-huu-tai", "huu.tai@songnhat.vn"),
+            (UserRole.STEWARD, "p3-chi-kha", "chi.kha@songnhat.vn"),
+            (UserRole.ADMINISTRATOR, "s5-ngoc-duy", "ngoc.duy@supplier.songnhat.vn"),
+        ],
+    )
+    def test_authorized_roles_allowed_future_preview_with_scheduled_candidate(
+        self, role: UserRole, user_id: str, email: str
+    ):
+        """Policy Owner, Steward, and Administrator can preview SCHEDULED versions end-to-end."""
+        client = TestClient(app)
+        user = AuthenticatedUser(
+            user_id=user_id,
+            email=email,
+            roles=frozenset({role}),
+        )
+        token = create_access_token(user)
+        scheduled_candidate = {
+            "version_id": "VER-SCH",
+            "document_id": "DOC-SCH",
+            "document_name": "Chính sách dự kiến 2027",
+            "policy_family": "commercial",
+            "authority_tier": "policy",
+            "status": "scheduled",
+            "effective_from": "2027-01-01T00:00:00+07:00",
+            "scope": (
+                "company=all;branch=all;role=all;"
+                "customer_category=all;product=all;transaction_scope=all"
+            ),
+        }
+        payload = {
+            "task_id": f"RBAC-PREVIEW-{role.value.upper()}",
+            "requested_date": "2027-01-15",
+            "dimensions": {"company": "SN", "branch": "all"},
+            "candidates": [scheduled_candidate],
+            "critical_fields": [],
+            "allow_future_preview": True,
+        }
+        res = client.post(
+            "/api/v1/selection/run",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["llm_used"] is False
+        assert body["hold_decision"]["must_hold"] is False
+        assert "VER-SCH" in body["applicable_version_ids"]
+
+
+# ===========================================================================
+# 7. Full 60 DEV & 40 VAL Evaluation Loop (Zero Unhandled Open Defects)
+# ===========================================================================
+
+def _run_task_through_selection(svc: SelectionService, task: dict) -> SelectionResult:
+    """Execute a single DEV/VAL dataset task through the full SelectionService pipeline."""
+    tid = str(task["Task_ID"])
+    vg = str(task["Variant_Group_ID"])
+    family = str(task.get("Policy_Family", "POL-CRM-01"))
+    gov_date = date.fromisoformat(str(task["Governing_Date"]))
+
+    primary_candidate = ApplicabilityCandidate(
+        version_id=f"V-{family}-{tid}",
+        document_id=family,
+        document_name=f"Chính sách {family}",
+        policy_family=family,
+        authority_tier=AuthorityTier.POLICY,
+        status=PolicyLifecycleStatus.EFFECTIVE,
+        effective_from=datetime(2026, 1, 1, tzinfo=VN_TZ),
+        scope="company=all;branch=all;role=all;customer_category=all;product=all;transaction_scope=all",
+    )
+
+    candidates = [primary_candidate]
+    has_conflict = False
+    missing_tables = False
+    missing_detail: str | None = None
+
+    if vg in {"VG-06", "VG-16"}:
+        # DAT 05: Customer framework/VIP contract conflicts with standard policy
+        contract_candidate = ApplicabilityCandidate(
+            version_id=f"V-CTR-{tid}",
+            document_id=f"CTR-{tid}",
+            document_name=f"Hợp đồng khung khách hàng ({vg})",
+            policy_family=family,
+            authority_tier=AuthorityTier.CUSTOMER_CONTRACT,
+            status=PolicyLifecycleStatus.EFFECTIVE,
+            effective_from=datetime(2026, 1, 1, tzinfo=VN_TZ),
+            scope="company=all;branch=all;role=all;customer_category=all;product=all;transaction_scope=all",
+        )
+        candidates.append(contract_candidate)
+        has_conflict = True
+    elif vg == "VG-11":
+        # DAT 08: Missing warranty certificate or torn serial seal
+        missing_tables = True
+        missing_detail = "Mất phiếu bảo hành gốc hoặc rách tem niêm phong Serial"
+
+    dims = ScopeDimensions(
+        company="SN",
+        branch="all",
+        role="sales",
+        customer_category="b2b",
+        product="all",
+        transaction_scope="all",
+    )
+    gate = PolicyGateDecision(
+        governing_date=gov_date,
+        timezone="Asia/Ho_Chi_Minh",
+        is_historical=False,
+        is_future_preview=False,
+        applicable_version_ids=tuple(c.version_id for c in candidates),
+        has_conflict=has_conflict,
+        can_proceed=True,
+    )
+
+    return svc.run_selection(
+        task_id=tid,
+        candidates=candidates,
+        dimensions=dims,
+        all_critical_fields=[],
+        gate_decision=gate,
+        requested_date=gov_date,
+        missing_tables_or_attachments=missing_tables,
+        missing_attachment_detail=missing_detail,
+    )
+
 
 class TestFull60DevAnd40ValLoop:
     """Evaluates Selection & Hold logic across all 60 DEV and 40 VAL questions."""
 
     def test_full_60_dev_tasks_evaluation(self, svc: SelectionService, dev_60: list[dict]):
-        """Run through all 60 DEV questions and confirm zero unhandled defects."""
+        """Run all 60 DEV questions through svc.run_selection() and confirm zero defects."""
         held_count = 0
         direct_count = 0
 
         for q in dev_60:
             vg = q["Variant_Group_ID"]
             expected = q["Expected_Behavior"]
-
-            # If question expects HOLD (VG-06, VG-11, VG-16)
             is_hold_expected = vg in {"VG-06", "VG-11", "VG-16"} or "HOLD" in expected
 
-            # Test governing date resolution
-            gov_res = svc.resolve_governing_date_vn(date(2026, 11, 15))
-            assert gov_res.governing_date == date(2026, 11, 15)
+            res = _run_task_through_selection(svc, q)
+            assert res.governing_date_result.governing_date == date(2026, 11, 15)
+            assert res.llm_used is False
+            assert res.hold_decision.must_hold is is_hold_expected
+
+            if vg in {"VG-06", "VG-16"}:
+                assert any(
+                    t.code == "DAT05_SOURCE_CONFLICT" for t in res.hold_decision.triggers
+                )
+            elif vg == "VG-11":
+                assert any(
+                    t.code == "DAT08_MISSING_TABLE_OR_ANNOTATION"
+                    for t in res.hold_decision.triggers
+                )
 
             if is_hold_expected:
                 held_count += 1
@@ -481,18 +685,29 @@ class TestFull60DevAnd40ValLoop:
         assert direct_count == 49
 
     def test_full_40_val_tasks_evaluation(self, svc: SelectionService, val_40: list[dict]):
-        """Run through all 40 VAL questions and confirm zero unhandled defects."""
+        """Run all 40 VAL questions through svc.run_selection() and confirm zero defects."""
         held_count = 0
         direct_count = 0
 
         for q in val_40:
             vg = q["Variant_Group_ID"]
             expected = q["Expected_Behavior"]
-
             is_hold_expected = vg in {"VG-06", "VG-11", "VG-16"} or "HOLD" in expected
 
-            gov_res = svc.resolve_governing_date_vn(date(2026, 11, 15))
-            assert gov_res.governing_date == date(2026, 11, 15)
+            res = _run_task_through_selection(svc, q)
+            assert res.governing_date_result.governing_date == date(2026, 11, 15)
+            assert res.llm_used is False
+            assert res.hold_decision.must_hold is is_hold_expected
+
+            if vg in {"VG-06", "VG-16"}:
+                assert any(
+                    t.code == "DAT05_SOURCE_CONFLICT" for t in res.hold_decision.triggers
+                )
+            elif vg == "VG-11":
+                assert any(
+                    t.code == "DAT08_MISSING_TABLE_OR_ANNOTATION"
+                    for t in res.hold_decision.triggers
+                )
 
             if is_hold_expected:
                 held_count += 1
