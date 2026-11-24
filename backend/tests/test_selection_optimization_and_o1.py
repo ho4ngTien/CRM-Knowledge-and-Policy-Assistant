@@ -2,7 +2,7 @@
 
 Traceability:
 - RFP / SRS: WP 03, DAT 07, SEC 02, OPS 03, OPS 04, VN 01.
-- Jira Task: CKPA-78 / CRM-G1-SUB22.
+- Jira Task: CKPA-78 / CRM-G1-SUB25.
 - AC Traceability: G1-AC03 (O1 locked in Base Scope), G1-AC05, G1-AC06, G1-AC07.
 """
 
@@ -264,6 +264,21 @@ class TestOptionO1BaseScopeIsolation:
         assert result.llm_used is False
         assert result.task_id is not None
 
+    def test_apply_o1_to_scope_dimensions_blocked_in_base_scope(self) -> None:
+        """apply_o1_to_scope_dimensions raises PermissionError when O1 is disabled."""
+        assert settings.ENABLE_O1_CONTEXT_IMPORT is False
+        dims = ScopeDimensions(branch="HN")
+        # Passing None remains allowed in Base Scope
+        assert apply_o1_to_scope_dimensions(dims, None) == dims
+
+        ctx = CustomerContextO1(
+            customer_id="KH-BLOCKED-01",
+            customer_tier="b2b",
+            assigned_branch="Hà Nội",
+        )
+        with pytest.raises(PermissionError, match="O1_OPTION_DISABLED_IN_BASE_SCOPE"):
+            apply_o1_to_scope_dimensions(dims, ctx)
+
 
 # ---------------------------------------------------------------------------
 # 4. Option O1 Readiness & SEC 02 Allowlist Tests (Purchased Branch)
@@ -285,6 +300,30 @@ class TestOptionO1ReadinessAndAllowlistValidation:
         assert ctx.customer_id == "CUST-VIP-001"
         assert ctx.customer_tier == "VIP"
         assert ctx.assigned_branch == "Hà Nội"
+
+    def test_o1_record_normalizes_uppercase_and_whitespace_keys(self) -> None:
+        """Uppercase or whitespace-padded allowlist keys are normalized cleanly."""
+        raw_payload = {
+            " Customer_ID ": "CUST-NORM-01",
+            "CUSTOMER_TIER": "b2b",
+            "  Assigned_Branch  ": "Hà Nội",
+            "ASSIGNED_COMPANY": "Song Nhật",
+        }
+        ctx = validate_o1_customer_record(raw_payload)
+        assert ctx.customer_id == "CUST-NORM-01"
+        assert ctx.customer_tier == "b2b"
+        assert ctx.assigned_branch == "Hà Nội"
+        assert ctx.assigned_company == "Song Nhật"
+
+    def test_o1_record_rejects_duplicate_normalized_keys(self) -> None:
+        """Duplicate keys colliding after strip/lower normalization must raise ValueError."""
+        raw_payload = {
+            "customer_id": "CUST-1",
+            " CUSTOMER_ID ": "CUST-2",
+            "customer_tier": "b2b",
+        }
+        with pytest.raises(ValueError, match="Duplicate keys after normalization"):
+            validate_o1_customer_record(raw_payload)
 
     @pytest.mark.parametrize(
         "forbidden_key,value",
@@ -346,8 +385,12 @@ class TestOptionO1ReadinessAndAllowlistValidation:
 class TestOptionO1IntegrationWithSelectionScope:
     """Verify that O1 context is deterministically mapped to 6-dimension scope matching."""
 
-    def test_o1_context_enriches_scope_dimensions_deterministically(self) -> None:
+    def test_o1_context_enriches_scope_dimensions_deterministically(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Unset or wildcard dimensions are automatically populated from approved O1 context."""
+        monkeypatch.setattr(settings, "ENABLE_O1_CONTEXT_IMPORT", True)
         context = CustomerContextO1(
             customer_id="KH-B2B-HN",
             customer_tier="b2b",
@@ -362,8 +405,12 @@ class TestOptionO1IntegrationWithSelectionScope:
         assert enriched.branch == "Hà Nội"
         assert enriched.company == "Song Nhật"
 
-    def test_selection_pipeline_filters_correctly_with_o1_context(self) -> None:
+    def test_selection_pipeline_filters_correctly_with_o1_context(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Confirm that Selection matches policies matching customer's branch and tier."""
+        monkeypatch.setattr(settings, "ENABLE_O1_CONTEXT_IMPORT", True)
         svc = SelectionService()
         gov_date = svc.resolve_governing_date_vn(None).governing_date
 

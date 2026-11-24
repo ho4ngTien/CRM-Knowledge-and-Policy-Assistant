@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.config import settings
 from src.modules.selection.schemas import ScopeDimensions
 
 # Hard caps per CAP-18 / DAT 07
@@ -107,7 +108,10 @@ def validate_o1_customer_record(raw_record: dict[str, Any]) -> CustomerContextO1
         )
         raise ValueError(err_msg)
 
-    return CustomerContextO1(**raw_record)
+    normalized = {str(k).strip().lower(): v for k, v in raw_record.items()}
+    if len(normalized) != len(raw_record):
+        raise ValueError("Duplicate keys after normalization in O1 record.")
+    return CustomerContextO1(**normalized)
 
 
 def validate_o1_batch_caps(records: list[dict[str, Any]], *, is_init: bool = False) -> None:
@@ -137,6 +141,12 @@ def apply_o1_to_scope_dimensions(
     """
     if context is None:
         return dimensions
+
+    if not settings.ENABLE_O1_CONTEXT_IMPORT:
+        raise PermissionError(
+            "O1_OPTION_DISABLED_IN_BASE_SCOPE: Cannot apply O1 customer context "
+            "when ENABLE_O1_CONTEXT_IMPORT is False."
+        )
 
     dim_dict = dimensions.model_dump()
 
