@@ -27,11 +27,11 @@ OPS 01 dùng harness benchmark hiện có, chạy trên SQLite in-memory; kết 
 ## Điều kiện còn chờ
 
 1. **Chưa có S4 sign-off độc lập:** các kiểm tra trên chạy trong worktree triển khai, không đáp ứng Separation of Duties.
-2. **Chưa có build/tag phát hành:** thay đổi chưa commit/PR; không tạo hoặc sửa tag đóng băng. Bản `v0.2.1-g1-offline` chưa được tạo trong worktree này. Chỉ kiểm định S4 trên artifact bất biến đã review mới có thể đóng CKPA-75.
+2. **Chưa có build/tag phát hành:** patch đã commit `80ab05f` và được mở PR [#33](https://github.com/ho4ngTien/CRM-Knowledge-and-Policy-Assistant/pull/33), hiện chờ review. Chưa tạo `v0.2.1-g1-offline` và không sửa tag đóng băng. Sau khi PR được review/merge, cần tạo artifact/tag bất biến mới để S4 kiểm định độc lập trước khi đóng CKPA-75.
 
 ## Quyết định
 
 Các lỗi logic CKPA-75 và blocker bootstrap DB mới đã được xử lý trên patch local; toàn bộ 151 backend tests, Ruff, Mypy và xác minh migration đều đạt. Tuy nhiên, **chưa thể tuyên bố CKPA-75 hoàn tất/nghiệm thu** cho đến khi:
 
-- review và đưa patch/test vào build bất biến mới;
+- review/merge PR #33 và đưa patch/test vào build bất biến mới;
 - S4 chạy độc lập full regression/fault injection trên đúng build/tag và ký sign-off theo SoD.
