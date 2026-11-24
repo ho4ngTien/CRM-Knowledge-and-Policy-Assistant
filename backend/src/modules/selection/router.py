@@ -35,6 +35,14 @@ class SelectionRequest(BaseModel):
         default=None,
         description="Detail of missing table or attachment (DAT 08).",
     )
+    allow_historical: bool = Field(
+        default=True,
+        description="Allow query on SUPERSEDED historical versions.",
+    )
+    allow_future_preview: bool = Field(
+        default=False,
+        description="Allow preview of SCHEDULED future versions (requires explicit permission).",
+    )
     # Caller may supply a pre-computed gate decision from the policy layer
     gate_decision: PolicyGateDecision | None = Field(
         default=None,
@@ -84,6 +92,8 @@ async def run_selection(
         all_critical_fields=body.critical_fields,
         gate_decision=gate,
         requested_date=body.requested_date,
+        allow_historical=body.allow_historical,
+        allow_future_preview=body.allow_future_preview,
         missing_tables_or_attachments=body.missing_tables_or_attachments,
         missing_attachment_detail=body.missing_attachment_detail,
     )

@@ -20,6 +20,7 @@ Acceptance Criteria (G1-AC05, G1-AC06):
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -43,7 +44,7 @@ from src.modules.selection.schemas import (
     SelectionResult,
 )
 from src.shared.contracts import PolicyGateDecision
-from src.shared.enums import ComparisonOperator, PolicyLifecycleStatus
+from src.shared.enums import AuthorityTier, ComparisonOperator, PolicyLifecycleStatus
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -323,28 +324,85 @@ class SelectionService:
     # 4. Mandatory Hold Gate (DAT 04, DAT 05, DAT 08, OPS 03)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _parse_decimal(raw: Decimal | float | int | str) -> Decimal:
+        if isinstance(raw, Decimal):
+            return raw
+        s = str(raw).strip()
+        match = re.search(r"[-+]?\d+(?:[.,]\d+)*", s)
+        if not match:
+            raise ValueError(f"No numeric component found in: {raw}")
+        num_str = match.group(0)
+
+        # Clean thousand separators
+        if "," in num_str and "." in num_str:
+            num_str = num_str.replace(",", "")
+        elif "," in num_str:
+            parts = num_str.split(",")
+            if len(parts) > 1 and all(len(p) == 3 for p in parts[1:]):
+                num_str = num_str.replace(",", "")
+            else:
+                num_str = num_str.replace(",", ".")
+        elif "." in num_str:
+            parts = num_str.split(".")
+            if len(parts) > 1 and all(len(p) == 3 for p in parts[1:]):
+                num_str = num_str.replace(".", "")
+
+        return Decimal(num_str)
+
     def evaluate_numeric_threshold(
-        self, operator: ComparisonOperator, actual: Decimal, target: str
+        self,
+        operator: ComparisonOperator | str,
+        actual: Decimal | float | int | str,
+        target: str,
     ) -> bool:
         """Compute threshold checks deterministically in Python (OPS 04, 0% LLM)."""
-        if operator == ComparisonOperator.BETWEEN:
-            low_s, high_s = [part.strip() for part in target.split(";", maxsplit=1)]
-            return Decimal(low_s) <= actual <= Decimal(high_s)
-        bound = Decimal(target.strip())
-        comparators = {
-            ComparisonOperator.LE: actual <= bound,
-            ComparisonOperator.LT: actual < bound,
-            ComparisonOperator.GE: actual >= bound,
-            ComparisonOperator.GT: actual > bound,
-            ComparisonOperator.EQ: actual == bound,
+        op_str = (
+            operator.value
+            if isinstance(operator, ComparisonOperator)
+            else str(operator).strip().lower()
+        )
+        op_map: dict[str, ComparisonOperator] = {
+            "<=": ComparisonOperator.LE,
+            "le": ComparisonOperator.LE,
+            "<": ComparisonOperator.LT,
+            "lt": ComparisonOperator.LT,
+            ">=": ComparisonOperator.GE,
+            "ge": ComparisonOperator.GE,
+            ">": ComparisonOperator.GT,
+            "gt": ComparisonOperator.GT,
+            "==": ComparisonOperator.EQ,
+            "=": ComparisonOperator.EQ,
+            "eq": ComparisonOperator.EQ,
+            "between": ComparisonOperator.BETWEEN,
         }
-        return comparators.get(operator, False)
+        resolved_op = op_map.get(op_str)
+        if resolved_op is None:
+            raise ValueError(f"Unsupported comparison operator: {operator}")
+
+        actual_dec = self._parse_decimal(actual)
+
+        if resolved_op == ComparisonOperator.BETWEEN:
+            low_s, high_s = [part.strip() for part in target.split(";", maxsplit=1)]
+            return self._parse_decimal(low_s) <= actual_dec <= self._parse_decimal(high_s)
+
+        bound = self._parse_decimal(target)
+        comparators = {
+            ComparisonOperator.LE: actual_dec <= bound,
+            ComparisonOperator.LT: actual_dec < bound,
+            ComparisonOperator.GE: actual_dec >= bound,
+            ComparisonOperator.GT: actual_dec > bound,
+            ComparisonOperator.EQ: actual_dec == bound,
+        }
+        return comparators.get(resolved_op, False)
 
     def evaluate_hold(
         self,
         gate_decision: PolicyGateDecision,
         critical_field_results: list[CriticalFieldLookupResult],
         *,
+        applicable_version_ids: list[str] | tuple[str, ...] | None = None,
+        matched_candidates: list[ApplicabilityCandidate] | None = None,
         missing_tables_or_attachments: bool = False,
         missing_attachment_detail: str | None = None,
     ) -> SelectionHoldDecision:
@@ -360,20 +418,44 @@ class SelectionService:
         """
         triggers: list[HoldTrigger] = []
 
+        # Effective applicable version IDs (post 6-dim scope matching when candidates provided)
+        effective_version_ids = (
+            applicable_version_ids
+            if applicable_version_ids is not None
+            else gate_decision.applicable_version_ids
+        )
+
         # --- DAT 04: No applicable policy version ---
-        if not gate_decision.applicable_version_ids:
+        if not effective_version_ids:
             triggers.append(
                 HoldTrigger(
                     code="DAT04_NO_APPLICABLE_VERSION",
                     reason_vi=(
                         "DAT 04 Hold: Không tìm thấy phiên bản chính sách hiệu lực "
-                        "cho ngày chi phối; cần chuyển chủ sở hữu chính sách."
+                        "cho ngày chi phối và phạm vi; cần chuyển chủ sở hữu chính sách."
                     ),
                 )
             )
 
         # --- DAT 05: Source conflict ---
-        if gate_decision.has_conflict:
+        has_conflict = False
+        if matched_candidates is not None:
+            # Evaluate conflict specifically among candidates that matched 6 dimensions
+            non_note = [
+                c for c in matched_candidates
+                if c.authority_tier != AuthorityTier.STAFF_NOTE
+            ]
+            tiers = {c.authority_tier for c in non_note}
+            contract_vs_policy = (
+                AuthorityTier.CUSTOMER_CONTRACT in tiers
+                and AuthorityTier.POLICY in tiers
+            )
+            multiple_versions = len(non_note) > 1
+            has_conflict = contract_vs_policy or multiple_versions
+        else:
+            has_conflict = gate_decision.has_conflict
+
+        if has_conflict:
             triggers.append(
                 HoldTrigger(
                     code="DAT05_SOURCE_CONFLICT",
@@ -445,6 +527,8 @@ class SelectionService:
         all_critical_fields: list[CriticalFieldItem],
         gate_decision: PolicyGateDecision,
         requested_date: date | None = None,
+        allow_historical: bool = True,
+        allow_future_preview: bool = False,
         missing_tables_or_attachments: bool = False,
         missing_attachment_detail: str | None = None,
     ) -> SelectionResult:
@@ -463,6 +547,10 @@ class SelectionService:
             all_critical_fields: Pre-fetched critical field rows from DB.
             gate_decision: Layer-2 PolicyGateDecision (from PolicyService).
             requested_date: Optional caller-supplied date; falls back to today UTC+7.
+            allow_historical: Allow query on SUPERSEDED historical versions.
+            allow_future_preview: Allow preview of SCHEDULED future versions.
+            missing_tables_or_attachments: Flag for missing essential evidence.
+            missing_attachment_detail: Description of missing attachment/table.
 
         Returns:
             SelectionResult – fully deterministic, llm_used=False always.
@@ -472,15 +560,19 @@ class SelectionService:
         # Step 1: Governing date
         date_result = self.resolve_governing_date_vn(requested_date)
         gov_date = date_result.governing_date
+        effective_historical = date_result.is_historical and allow_historical
+        effective_future_preview = date_result.is_future_preview and allow_future_preview
 
         # Step 2: 6-dim scope matching
         scope_matches = self.match_scope_6dim_bulk(
             candidates,
             dimensions,
             gov_date,
-            allow_historical=date_result.is_historical,
-            allow_future_preview=date_result.is_future_preview,
+            allow_historical=effective_historical,
+            allow_future_preview=effective_future_preview,
         )
+        matched_version_ids = {m.version_id for m in scope_matches if m.matched}
+        matched_candidates = [c for c in candidates if c.version_id in matched_version_ids]
         applicable_ids = [m.version_id for m in scope_matches if m.matched]
 
         # Step 3: Critical field lookup for applicable versions
@@ -498,6 +590,8 @@ class SelectionService:
         hold_decision = self.evaluate_hold(
             gate_decision,
             cf_lookup_results,
+            applicable_version_ids=applicable_ids if candidates else None,
+            matched_candidates=matched_candidates if candidates else None,
             missing_tables_or_attachments=missing_tables_or_attachments,
             missing_attachment_detail=missing_attachment_detail,
         )
