@@ -35,6 +35,25 @@ UNACCENT_NEGATIONS_MAP: dict[str, str] = {
     "huy": "hủy",
 }
 
+# Pre-compiled high-performance Regex patterns sorted by length descending (VN 01, ANS 02)
+_SORTED_UNACCENT = sorted(VIETNAMESE_UNACCENT_MAPPINGS.keys(), key=len, reverse=True)
+_PATTERN_UNACCENT = re.compile(
+    rf"(?<!\w)({'|'.join(re.escape(k) for k in _SORTED_UNACCENT)})(?!\w)",
+    re.IGNORECASE,
+)
+
+_SORTED_NEG = sorted(UNACCENT_NEGATIONS_MAP.keys(), key=len, reverse=True)
+_PATTERN_NEG = re.compile(
+    rf"(?<!\w)({'|'.join(re.escape(k) for k in _SORTED_NEG)})(?!\w)",
+    re.IGNORECASE,
+)
+
+_SORTED_PRESERVED_NEG = sorted(VIETNAMESE_NEGATIONS, key=len, reverse=True)
+_PATTERN_PRESERVED_NEG = re.compile(
+    rf"(?<!\w)({'|'.join(re.escape(k) for k in _SORTED_PRESERVED_NEG)})(?!\w)",
+    re.IGNORECASE,
+)
+
 
 class RetrievalService:
     """Filters by permission/lifecycle before ranking and preserves Vietnamese negations."""
@@ -42,17 +61,13 @@ class RetrievalService:
     def detect_preserved_negations(self, text: str) -> list[str]:
         """Detect and isolate all approved Vietnamese negation markers (ANS 02, ANS 07)."""
         lowered = text.lower()
-        # Map unaccented negations first
-        for unacc, acc in UNACCENT_NEGATIONS_MAP.items():
-            pattern = rf"(?<!\w){re.escape(unacc)}(?!\w)"
-            if re.search(pattern, lowered):
-                lowered = re.sub(pattern, acc, lowered)
+        # Map unaccented negations first using compiled O(1) pattern
+        lowered = _PATTERN_NEG.sub(
+            lambda m: UNACCENT_NEGATIONS_MAP[m.group(0).lower()],
+            lowered,
+        )
 
-        found: list[str] = []
-        for neg in VIETNAMESE_NEGATIONS:
-            pattern = rf"(?<!\w){re.escape(neg)}(?!\w)"
-            if re.search(pattern, lowered):
-                found.append(neg)
+        found = [m.group(0).lower() for m in _PATTERN_PRESERVED_NEG.finditer(lowered)]
         return list(dict.fromkeys(found))
 
     def normalize_query_vi(self, query: str) -> tuple[str, list[str]]:
@@ -61,16 +76,16 @@ class RetrievalService:
         normalized = cleaned.lower()
 
         # Step 1: Map common unaccented CRM terms to standard Vietnamese accented terms (VN 01)
-        for unaccent, accented in VIETNAMESE_UNACCENT_MAPPINGS.items():
-            pattern = rf"(?<!\w){re.escape(unaccent)}(?!\w)"
-            if re.search(pattern, normalized):
-                normalized = re.sub(pattern, accented, normalized)
+        normalized = _PATTERN_UNACCENT.sub(
+            lambda m: VIETNAMESE_UNACCENT_MAPPINGS[m.group(0).lower()],
+            normalized,
+        )
 
         # Step 1b: Map unaccented negation variants to preserved accented negations
-        for unacc, acc in UNACCENT_NEGATIONS_MAP.items():
-            pattern = rf"(?<!\w){re.escape(unacc)}(?!\w)"
-            if re.search(pattern, normalized):
-                normalized = re.sub(pattern, acc, normalized)
+        normalized = _PATTERN_NEG.sub(
+            lambda m: UNACCENT_NEGATIONS_MAP[m.group(0).lower()],
+            normalized,
+        )
 
         # Step 2: Tokenize and expand approved CRM abbreviations (42 entries in glossary)
         tokens = re.findall(r"[\w]+", normalized)

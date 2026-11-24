@@ -24,6 +24,7 @@ import re
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 from src.config import settings
@@ -63,16 +64,27 @@ _DIMENSION_KEYS: tuple[str, ...] = (
     "transaction_scope",
 )
 
+_SORTED_DIM_UNACCENT = sorted(VIETNAMESE_UNACCENT_MAPPINGS.keys(), key=len, reverse=True)
+_PATTERN_DIM_UNACCENT = re.compile(
+    rf"(?<!\w)({'|'.join(re.escape(k) for k in _SORTED_DIM_UNACCENT)})(?!\w)",
+    re.IGNORECASE,
+)
+
+
+@lru_cache(maxsize=2048)
+def _normalize_dim_token_cached(value: str) -> str:
+    val = " ".join(value.strip().lower().split())
+    return _PATTERN_DIM_UNACCENT.sub(
+        lambda m: VIETNAMESE_UNACCENT_MAPPINGS[m.group(0).lower()],
+        val,
+    )
+
 
 def _normalize_dim_token(value: str | None) -> str | None:
     """Normalize whitespace and map unaccented phrases using VN 01 SUB08 dictionary."""
     if value is None:
         return None
-    val = " ".join(value.strip().lower().split())
-    for unacc, acc in VIETNAMESE_UNACCENT_MAPPINGS.items():
-        if unacc in val:
-            val = val.replace(unacc, acc)
-    return val
+    return _normalize_dim_token_cached(value)
 
 
 def _get_synonym_family(value: str) -> set[str]:
