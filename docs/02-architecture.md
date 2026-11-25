@@ -316,3 +316,33 @@ stateDiagram-v2
 | **ADR-003** | **Cấm Pre-Verification Streaming (`INV-03`)** | Nếu stream token trực tiếp từ LLM ra trình duyệt, câu trả lời có thể chứa trích dẫn sai, số liệu lệch hoặc tham chiếu văn bản vừa bị `withdrawn` giữa chừng (*Worked Case 9*). | Phản hồi đồng bộ qua `POST /api/v1/answer` sau khi `ValidationService` hoàn tất đối chiếu và re-check DB; chấp nhận đợi trọn gói trong mục tiêu độ trễ `p95 <= 25s` (`OPS 02`). |
 | **ADR-004** | **PostgreSQL 16 (`pgvector` + `unaccent` + `pg_trgm` G1) làm kho dữ liệu & tìm kiếm hợp nhất** | Corpus Base Scope tối đa `300` passages và `50` critical fields; gộp dữ liệu quan hệ, trạng thái thẩm quyền, FTS tiếng Việt và vector `1536` chiều vào một CSDL duy nhất. | Loại bỏ nhu cầu dựng thêm MinIO hay Vector DB rời; giúp filter quyền/trạng thái nguyên tử bằng SQL trước xếp hạng và đơn giản hóa Backup/Restore Replay (`RTO 4h / RPO 24h`). |
 | **ADR-005** | **Nạp dữ liệu qua 2 CSV UTF-8 & Xuất dữ liệu mở (`OPS 08`), tách biệt `O1`** | Ngăn rò rỉ dữ liệu khách hàng thật (`SEC 02`), tránh chi phí và rủi ro kết nối CRM sống ngoài phạm vi RFP, đồng thời bảo đảm khả năng thoát không khóa nhà cung cấp. | Yêu cầu `P3` Steward xuất CSV chuẩn `21`/`23` cột với tối đa `500` dòng/ngày và xử lý hàng đợi Quarantine thủ công khi thiếu chú thích/bảng (`DAT 08`). |
+
+---
+
+## 8. Phân tách Kho Mã nguồn (Repos), Môi trường & Không gian Lưu trữ theo RFP
+
+RFP **không áp đặt** cấu trúc monorepo/multi-repo hay framework cụ thể, nhưng các ràng buộc bắt buộc (`M`) về **tách biệt kiểm thử độc lập — Chinese Wall** (`RFP Mục 8 & Mục 11`, chi tiết tại [DEL01-G / CKPA-30](./specs/g0/qa-and-operations/CKPA-30_SUB20_DEL01G_Independent_Acceptance_Plan_280_Cases_And_SealedRepo.md)) và **tách môi trường Test/Prod** (`SEC 06`) chia toàn bộ hệ sinh thái dự án thành **4 không gian độc lập**:
+
+### 8.1 Tổng quan 4 Không gian Lưu trữ
+
+| Không gian | Loại | Nội dung được phép lưu | Nội dung cấm tuyệt đối |
+|---|---|---|---|
+| **1. `main-app-repo`** *(repo hiện tại)* | Kho Git Build chính | Mã nguồn (`backend/`, `worker/`, `frontend/`, `infra/`, `prompts/answer_system_vi.txt`), CSV mẫu & corpus G1 (`data/templates/`, `data/g1/`), tập eval công khai sạch PII (`dev_60`: `VG-04/06/07/12/16`; `val_40`: `VG-01/08/14`), đặc tả kỹ thuật G0 (`docs/specs/g0/`), báo cáo G1 (`docs/work-packages/`). | `sealed_100` (8 nhóm `VG-02/03/05/09/10/11/13/15`), đáp án `challenges_80`, PII thật, secrets/API key thật, hồ sơ báo giá `DEL 05` & chấm thầu Bên Mua (Mục 13–14). |
+| **2. `sealed-eval-repo`** *(tách vật lý)* | Kho Git Niêm phong (`Chinese Wall`) | `100 Sealed` (8 nhóm `VG` độc lập, `0%` chồng lấp `dev_60`/`val_40`), `80 Challenges` (`40` chung + `40 VN 02`), nhãn chuẩn 6 chiều do `[P2]` & `[P3]` đối soát độc lập (`Kappa >= 0.80`), manifest `SHA-256`. | Mã nguồn sản xuất; quyền Read/Clone/Fork/Export của đội Build (`[S2]`, `[S3]`), `[S5]` (`administrator`) và `[P4]`. |
+| **3. Hạ tầng `Test` vs `Production`** (`SEC 06`) | 2 môi trường chạy tách VPC/DB/Storage/Keys | **Test (`G1–G2`):** Dữ liệu giả lập/sạch `0%` PII cho `OPS 01–06`, `SEC 01/05` và chạy chấm điểm độc lập.<br>**Prod (`G3–G4`):** Corpus chính thức, tùy chọn `O1` *(chỉ nếu duyệt riêng)*, Audit Logs chống rò rỉ (`SEC 01/08`), Backup mã hóa (`RTO <= 4h / RPO <= 24h`, lịch Annex C bảo toàn `Withdrawn`). | Dùng dữ liệu PII thật trên môi trường Test; dùng chung DB, khóa bí mật hoặc network giữa Test và Prod. |
+| **4. Kho Quản trị & Thương mại ngoài Git** | Jira / Drive Bên Mua | Sổ nguồn & văn bản chính sách gốc có chữ ký (`Source Register` của `[P2]`/`[P3]`), hồ sơ thương mại/báo giá 14 dòng & TCO 3 năm (`DEL 05`), hồ sơ chấm thầu Mục 13 & quyết định cổng G0–G4 Mục 14 (`CKPA-37`, `CKPA-39`, `CKPA-41`). | Commit trực tiếp hồ sơ giá hoặc chấm thầu Bên Mua vào `main-app-repo`. |
+
+### 8.2 Ma trận Phân quyền Giữa `main-app-repo` và `sealed-eval-repo`
+
+| Vai trò RFP Mục 11 | Quyền trên `main-app-repo` | Quyền trên `sealed-eval-repo` & `sealed_100` | Quy tắc chống rò rỉ bắt buộc |
+|---|---|---|---|
+| **`[S2]`, `[S3]`** *(Build Engineers)* | `READ / WRITE` code Build | **`DENY TUYỆT ĐỐI`** (`0%` Read/Clone/Fork/Export) | Ticket lỗi Jira chỉ ghi `Task_ID`, `Variant_Group_ID`, mã `Hold/Defect`; cấm dán nguyên văn câu hỏi niêm phong. |
+| **`[S5]`** *(Operations / `administrator`)* | Vận hành hạ tầng, CI/CD, backup | **`DENY TUYỆT ĐỐI`** (`administrator = DENY`) | Khi `Eval Runner` chạy chế độ `eval_audit_mode = true`, log hạ tầng chỉ ghi `task_id_hash`, latency, token, HTTP status. |
+| **`[S4]`** *(Quality Lead — Independent QA)* | **`READ_ONLY`** (`0%` commit/merge code Build) | **`READ / WRITE / EXECUTE_EVAL`** (MFA bắt buộc) | Chủ trì vận hành kho niêm phong, ký số `SHA-256` manifest; không viết/tinh chỉnh prompt hay logic truy xuất sản xuất. |
+| **`[P2]`, `[P3]`** *(Two Policy Reviewers)* | `READ` & duyệt corpus CSV | **`ALLOW_CONTROLLED_REVIEW`** | Gán nhãn kép độc lập 6 chiều (`Gold Labels`) và ký xác nhận kết quả nghiệm thu chính sách. |
+| **`[P5]`** *(Privacy & Security Owner)* | `READ` & kiểm toán bảo mật/PII | `READ_AUDIT_LOGS / VERIFY_PII_RBAC` (`DENY` câu hỏi thô) | Kiểm toán ACL của `sealed-eval-repo` và xác nhận `0%` PII thật. |
+| **`[P1]`** *(Sponsor)* & **`[S1]`** *(Named Lead)* | Phê duyệt cổng / quản lý tiến độ | `READ_SUMMARY_ONLY` (`DENY` câu hỏi thô) | Chỉ xem bảng chỉ số tổng hợp và mã băm `SHA-256`. |
+| **`[P4]`** *(5 Representative Staff Users)* | Tham gia UAT & Pilot 20 ngày (G3) | **`DENY`** | Không xem trước đề thi `100 Sealed` để bảo toàn tính khách quan ở G3. |
+
+> **Quy tắc tái kiểm thử khi lộ đề (RFP Mục 8):** Nếu bất kỳ ca nào thuộc `sealed_100` bị lộ sang đội Build, ca đó mất hiệu lực niêm phong và bắt buộc thay thế/kiểm thử lại độc lập trước khi duyệt cổng G2.
+
