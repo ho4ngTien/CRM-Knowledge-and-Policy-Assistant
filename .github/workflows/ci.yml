@@ -9,6 +9,29 @@ on:
 jobs:
   backend-lint-and-contracts:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: ckpa_db
+          POSTGRES_USER: ckpa
+          POSTGRES_PASSWORD: ckpa_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ckpa -d ckpa_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: backend
@@ -35,6 +58,10 @@ jobs:
       - name: Run Pytest backend contracts
         env:
           APP_ENV: test
+          DATABASE_URL: postgresql+asyncpg://ckpa:ckpa_pass@localhost:5432/ckpa_db
+          REDIS_URL: redis://localhost:6379/0
+          CELERY_BROKER_URL: redis://localhost:6379/1
+          CELERY_RESULT_BACKEND: redis://localhost:6379/2
         run: pytest -q
 
   worker-syntax-check:
