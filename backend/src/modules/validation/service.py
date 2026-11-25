@@ -35,6 +35,21 @@ def _normalize_numeric_token(text: str) -> str:
     return re.sub(r"[.,_\s]", "", text.lower())
 
 
+def _contains_numeric_token(normalized_text: str, norm_val: str) -> bool:
+    """Match a normalized numeric token only on non-digit boundaries (prevents '5' in '15'/'50')."""
+    return bool(re.search(rf"(?<!\d){re.escape(norm_val)}(?!\d)", normalized_text))
+
+
+_UNPUBLISHED_VALIDATION_STATUSES: frozenset[PolicyLifecycleStatus] = frozenset(
+    {
+        PolicyLifecycleStatus.DRAFT,
+        PolicyLifecycleStatus.OWNER_REVIEWED,
+        PolicyLifecycleStatus.APPROVED,
+        PolicyLifecycleStatus.FEEDBACK_CANDIDATE,
+    }
+)
+
+
 class ValidationService:
     """Blocks delivery if any citation is unverified, unauthorized, or withdrawn mid-flight."""
 
@@ -69,15 +84,20 @@ class ValidationService:
                 continue
             if not check_policy_audience(user, passage.audience):
                 raise AccessDenied(f"Audience permission revoked for passage {c.passage_id}.")
-            if passage.status == PolicyLifecycleStatus.WITHDRAWN:
+            if passage.is_tombstoned or passage.status == PolicyLifecycleStatus.WITHDRAWN:
                 stale = True
-                reasons.append(f"Source withdrawn mid-answer: {c.passage_id}")
+                reasons.append(f"Source withdrawn or tombstoned mid-answer: {c.passage_id}")
                 continue
             if passage.status == PolicyLifecycleStatus.QUARANTINED or (
                 not passage.has_essential_attachments
             ):
                 stale = True
                 reasons.append(f"Source quarantined or incomplete: {c.passage_id}")
+                continue
+            if passage.status in _UNPUBLISHED_VALIDATION_STATUSES:
+                reasons.append(
+                    f"Unpublished source cannot be cited ({passage.status.value}): {c.passage_id}"
+                )
                 continue
             if passage.status == PolicyLifecycleStatus.SCHEDULED and not allow_future_preview:
                 reasons.append(f"Scheduled future source cannot govern present: {c.passage_id}")
@@ -113,10 +133,13 @@ class ValidationService:
         normalized_guidance = _normalize_numeric_token(guidance_text)
 
         for cf in critical_fields:
-            if cf.status in {
-                PolicyLifecycleStatus.WITHDRAWN,
-                PolicyLifecycleStatus.QUARANTINED,
-            }:
+            if cf.status in (
+                {
+                    PolicyLifecycleStatus.WITHDRAWN,
+                    PolicyLifecycleStatus.QUARANTINED,
+                }
+                | _UNPUBLISHED_VALIDATION_STATUSES
+            ):
                 errors.append(
                     f"Critical field {cf.field_id} ({cf.field_name}) is {cf.status.value}."
                 )
@@ -151,8 +174,8 @@ class ValidationService:
                     if (
                         not low_norm
                         or not high_norm
-                        or low_norm not in normalized_guidance
-                        or high_norm not in normalized_guidance
+                        or not _contains_numeric_token(normalized_guidance, low_norm)
+                        or not _contains_numeric_token(normalized_guidance, high_norm)
                     ):
                         errors.append(
                             f"Critical field {cf.field_name} range '{raw_val}' "
@@ -160,7 +183,9 @@ class ValidationService:
                         )
                 else:
                     normalized_val = _normalize_numeric_token(raw_val)
-                    if normalized_val and normalized_val not in normalized_guidance:
+                    if normalized_val and not _contains_numeric_token(
+                        normalized_guidance, normalized_val
+                    ):
                         errors.append(
                             f"Critical field {cf.field_name} value '{raw_val}' "
                             "missing or altered in guidance."

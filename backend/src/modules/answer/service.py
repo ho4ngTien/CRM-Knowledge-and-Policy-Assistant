@@ -207,7 +207,11 @@ class AnswerOrchestratorService:
 
         task_id = request.task_id or f"TASK-{uuid.uuid4().hex[:8].upper()}"
         answer_id = f"ANS-{uuid.uuid4().hex[:10].upper()}"
-        pii_warning = scan_query_for_pii(request.question).warning_message_vi or None
+        pii_scan = scan_query_for_pii(request.question)
+        pii_warning = pii_scan.warning_message_vi or None
+        llm_question = (
+            pii_scan.redacted_preview if pii_scan.has_suspected_pii else request.question
+        )
         gov_date, is_hist, is_future = self._policy_gate.resolve_governing_date_vn(
             request.governing_date
         )
@@ -363,11 +367,11 @@ class AnswerOrchestratorService:
 
         system_prompt = self.load_system_prompt()
         envelope = self.build_untrusted_prompt_envelope(
-            request.question, passages, list(gate.critical_fields)
+            llm_question, passages, list(gate.critical_fields)
         )
         gen_req = LLMGenerationRequest(
             task_id=task_id,
-            question=request.question,
+            question=llm_question,
             system_prompt=system_prompt,
             user_prompt_envelope=envelope,
             governing_date=gate.governing_date,

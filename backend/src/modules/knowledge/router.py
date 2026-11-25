@@ -36,8 +36,7 @@ async def get_document_lineage(
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> DocumentLineageResponse:
     """View version lineage for a curated policy document."""
-    _ = current_user
-    return await service.get_document_lineage(db, document_id)
+    return await service.get_document_lineage(db, current_user, document_id)
 
 
 @router.get("/snapshot-age", response_model=SnapshotAgeResponse)
