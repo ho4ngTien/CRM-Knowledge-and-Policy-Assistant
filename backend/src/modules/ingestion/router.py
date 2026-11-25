@@ -9,6 +9,7 @@ from src.config import settings
 from src.db import get_db
 from src.modules.ingestion.schemas import CsvValidationReport, QuarantineItemResponse
 from src.modules.ingestion.service import (
+    CorpusCeilingExceeded,
     IdempotencyKeyConflict,
     IngestionService,
     StaleBatchRejected,
@@ -70,11 +71,14 @@ async def import_csv_batch(
             idempotency_key=idempotency_key,
             submitted_by=current_user.user_id,
             batch_timestamp=batch_timestamp,
+            enforce_corpus_ceiling=True,
         )
     except IdempotencyKeyConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except StaleBatchRejected as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CorpusCeilingExceeded as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/o1/context/import")
