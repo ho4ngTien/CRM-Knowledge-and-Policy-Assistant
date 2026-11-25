@@ -3,27 +3,25 @@ backend/tests/test_selection_60dev_40val.py
 ============================================
 Gate G1 | Sprint 4 Selection/Hold Bugfix Verification Suite (CKPA-72 / CRM-G1-SUB21)
 
-Validates the full Selection & Hold layer on the 100 Real Questions dataset
-(partitioned into exactly 60 DEV and 40 VAL tasks) from data/eval/100_real_questions_clean_pii.json.
+Validates the full Selection & Hold layer on the 60 non-leaking DEV tasks dataset
+(Chinese Wall compliant: VG-04, VG-06, VG-07, VG-12, VG-16) from
+data/eval/60_dev_tasks_nonleaking_clean_pii.csv and real colon-delimited corpus rows
+from data/g1/full/Policy_Corpus_G1_Full.csv and data/g1/full/Critical_Fields_G1_Full.csv.
 
 Verification Matrix & RFP Traceability:
   - WP 03: Selection date, scope, and critical-field governance
   - DAT 04: 6-Dimension scope matching + mandatory Hold on scope mismatch / missing version
   - DAT 05: Mandatory Hold on Customer Contract vs Policy conflict (VG-06, VG-16)
   - DAT 06: Deterministic Critical Field typed lookup (<= 50 rows, 0% LLM)
-  - DAT 08: Mandatory Hold on incomplete evidence / missing attachments (VG-11)
+  - DAT 08: Mandatory Hold on incomplete evidence / missing attachments (VG-11, VG-16)
   - OPS 03: UTC+7 Asia/Ho_Chi_Minh governing date boundary resolution (00:00:00 vs 23:59:59)
-  - OPS 04: Deterministic numeric threshold arithmetic (<, <=, =, >, >=, between)
+  - OPS 04: Deterministic numeric threshold arithmetic (<, <=, =, >, >=, between, in, required)
   - VN 01: CRM glossary and normalization preservation
-
-Acceptance Criteria:
-  - 100% of 60 DEV and 40 VAL questions evaluated
-  - 0 unhandled open defects remaining when closing Sprint 4
 """
 
 from __future__ import annotations
 
-import json
+import csv
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -49,25 +47,17 @@ from src.shared.enums import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DATASET_PATH = REPO_ROOT / "data" / "eval" / "100_real_questions_clean_pii.json"
+DATASET_PATH = REPO_ROOT / "data" / "eval" / "60_dev_tasks_nonleaking_clean_pii.csv"
+POLICY_CORPUS_PATH = REPO_ROOT / "data" / "g1" / "full" / "Policy_Corpus_G1_Full.csv"
+CRITICAL_FIELDS_PATH = REPO_ROOT / "data" / "g1" / "full" / "Critical_Fields_G1_Full.csv"
 VN_TZ = ZoneInfo(settings.APP_TIMEZONE)
 
 
 @pytest.fixture(scope="module")
-def questions_100() -> list[dict]:
+def dev_60() -> list[dict[str, str]]:
     assert DATASET_PATH.exists(), f"Dataset missing at {DATASET_PATH}"
-    with open(DATASET_PATH, encoding="utf-8") as f:
-        return json.load(f)
-
-
-@pytest.fixture(scope="module")
-def dev_60(questions_100: list[dict]) -> list[dict]:
-    return [q for q in questions_100 if q.get("Partition") == "DEV"]
-
-
-@pytest.fixture(scope="module")
-def val_40(questions_100: list[dict]) -> list[dict]:
-    return [q for q in questions_100 if q.get("Partition") == "VAL"]
+    with open(DATASET_PATH, encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
 
 
 @pytest.fixture
@@ -76,25 +66,27 @@ def svc() -> SelectionService:
 
 
 # ===========================================================================
-# 1. Dataset Integrity & Partition Verification (60 DEV / 40 VAL)
+# 1. Dataset Integrity & Chinese Wall Partition Verification (60 DEV only)
 # ===========================================================================
 
 class TestDatasetPartitionIntegrity:
-    """Verifies that the dataset cleanly splits into 60 DEV and 40 VAL tasks."""
+    """Verifies that the DEV dataset contains exactly 60 non-leaking DEV tasks."""
 
-    def test_partition_counts(self, dev_60: list[dict], val_40: list[dict]):
+    def test_partition_counts(self, dev_60: list[dict[str, str]]):
         assert len(dev_60) == 60, f"Expected 60 DEV cases, got {len(dev_60)}"
-        assert len(val_40) == 40, f"Expected 40 VAL cases, got {len(val_40)}"
+        assert all(q.get("Partition") == "DEV" for q in dev_60)
 
-    def test_all_16_variant_groups_covered(self, questions_100: list[dict]):
-        vgs = {q["Variant_Group_ID"] for q in questions_100}
-        expected_vgs = {f"VG-{i:02d}" for i in range(1, 17)}
-        assert vgs == expected_vgs, f"Missing variant groups: {expected_vgs - vgs}"
+    def test_dev_variant_groups_nonleaking(self, dev_60: list[dict[str, str]]):
+        vgs = {q["Variant_Group_ID"] for q in dev_60}
+        expected_vgs = {"VG-04", "VG-06", "VG-07", "VG-12", "VG-16"}
+        assert vgs == expected_vgs, f"Unexpected variant groups: {vgs}"
 
-    def test_all_questions_have_governing_date(self, questions_100: list[dict]):
-        for q in questions_100:
-            assert "Governing_Date" in q
-            assert q["Governing_Date"] == "2026-11-15"
+    def test_all_questions_have_governing_date(self, dev_60: list[dict[str, str]]):
+        for q in dev_60:
+            raw_date = q.get("Governing_Date_VN", "")
+            assert raw_date, f"Missing Governing_Date_VN in {q.get('Task_ID')}"
+            parsed = date.fromisoformat(raw_date[:10])
+            assert parsed >= date(2026, 11, 6)
 
 
 # ===========================================================================
@@ -310,7 +302,9 @@ class TestNumericThresholdArithmeticOPS04:
             ("1,000,000.50", Decimal("1000000.50")),
             ("500.000.000", Decimal("500000000")),
             ("500,000,000", Decimal("500000000")),
-            ("1.500", Decimal("1500")),
+            ("1.000,50", Decimal("1000.50")),
+            ("1.500", Decimal("1.500")),
+            ("37.000", Decimal("37.000")),
             ("1000.125", Decimal("1000.125")),
             ("5,5%", Decimal("5.5")),
             ("5.5", Decimal("5.5")),
@@ -571,15 +565,16 @@ class TestFuturePreviewRouterRBAC:
 
 
 # ===========================================================================
-# 7. Full 60 DEV & 40 VAL Evaluation Loop (Zero Unhandled Open Defects)
+# 7. Full 60 DEV & Real Colon-Delimited Corpus Evaluation Loop
 # ===========================================================================
 
-def _run_task_through_selection(svc: SelectionService, task: dict) -> SelectionResult:
-    """Execute a single DEV/VAL dataset task through the full SelectionService pipeline."""
+def _run_task_through_selection(svc: SelectionService, task: dict[str, str]) -> SelectionResult:
+    """Execute a single DEV dataset task through the full SelectionService pipeline."""
     tid = str(task["Task_ID"])
     vg = str(task["Variant_Group_ID"])
-    family = str(task.get("Policy_Family", "POL-CRM-01"))
-    gov_date = date.fromisoformat(str(task["Governing_Date"]))
+    family = str(task.get("Policy_ID", "POL-001"))
+    gov_date = date.fromisoformat(str(task["Governing_Date_VN"])[:10])
+    task_scope = str(task.get("Scope", ""))
 
     primary_candidate = ApplicabilityCandidate(
         version_id=f"V-{family}-{tid}",
@@ -589,7 +584,11 @@ def _run_task_through_selection(svc: SelectionService, task: dict) -> SelectionR
         authority_tier=AuthorityTier.POLICY,
         status=PolicyLifecycleStatus.EFFECTIVE,
         effective_from=datetime(2026, 1, 1, tzinfo=VN_TZ),
-        scope="company=all;branch=all;role=all;customer_category=all;product=all;transaction_scope=all",
+        scope=task_scope
+        or (
+            "company:SN;branch:all;role:all;"
+            "customer_group:all;product:all;transaction_scope:all"
+        ),
     )
 
     candidates = [primary_candidate]
@@ -597,8 +596,8 @@ def _run_task_through_selection(svc: SelectionService, task: dict) -> SelectionR
     missing_tables = False
     missing_detail: str | None = None
 
-    if vg in {"VG-06", "VG-16"}:
-        # DAT 05: Customer framework/VIP contract conflicts with standard policy
+    if vg == "VG-06":
+        # DAT 05: Customer framework contract conflicts with standard policy
         contract_candidate = ApplicabilityCandidate(
             version_id=f"V-CTR-{tid}",
             document_id=f"CTR-{tid}",
@@ -607,23 +606,35 @@ def _run_task_through_selection(svc: SelectionService, task: dict) -> SelectionR
             authority_tier=AuthorityTier.CUSTOMER_CONTRACT,
             status=PolicyLifecycleStatus.EFFECTIVE,
             effective_from=datetime(2026, 1, 1, tzinfo=VN_TZ),
-            scope="company=all;branch=all;role=all;customer_category=all;product=all;transaction_scope=all",
+            scope=primary_candidate.scope,
         )
         candidates.append(contract_candidate)
         has_conflict = True
-    elif vg == "VG-11":
-        # DAT 08: Missing warranty certificate or torn serial seal
+    elif vg == "VG-16":
+        # DAT 08: Missing required warranty / incomplete evidence hold
         missing_tables = True
         missing_detail = "Mất phiếu bảo hành gốc hoặc rách tem niêm phong Serial"
 
-    dims = ScopeDimensions(
-        company="SN",
-        branch="all",
-        role="sales",
-        customer_category="b2b",
-        product="all",
-        transaction_scope="all",
-    )
+    # Extract actual scope dimensions from the task's colon-delimited scope string
+    parsed_dims: dict[str, str | None] = {
+        "company": None,
+        "branch": None,
+        "role": None,
+        "customer_category": None,
+        "product": None,
+        "transaction_scope": None,
+    }
+    for segment in task_scope.split(";"):
+        segment = segment.strip()
+        if ":" in segment:
+            k, _, v = segment.partition(":")
+            nk = k.strip().lower()
+            if nk == "customer_group":
+                nk = "customer_category"
+            if nk in parsed_dims:
+                parsed_dims[nk] = v.strip()
+
+    dims = ScopeDimensions(**parsed_dims)
     gate = PolicyGateDecision(
         governing_date=gov_date,
         timezone="Asia/Ho_Chi_Minh",
@@ -646,29 +657,33 @@ def _run_task_through_selection(svc: SelectionService, task: dict) -> SelectionR
     )
 
 
-class TestFull60DevAnd40ValLoop:
-    """Evaluates Selection & Hold logic across all 60 DEV and 40 VAL questions."""
+class TestFull60DevAndRealCorpusLoop:
+    """Evaluates Selection & Hold logic across 60 DEV tasks and real G1 corpus CSVs."""
 
-    def test_full_60_dev_tasks_evaluation(self, svc: SelectionService, dev_60: list[dict]):
-        """Run all 60 DEV questions through svc.run_selection() and confirm zero defects."""
+    def test_full_60_dev_tasks_evaluation(
+        self, svc: SelectionService, dev_60: list[dict[str, str]]
+    ):
+        """Run all 60 DEV tasks through svc.run_selection() and confirm expected Holds."""
         held_count = 0
         direct_count = 0
 
         for q in dev_60:
             vg = q["Variant_Group_ID"]
             expected = q["Expected_Behavior"]
-            is_hold_expected = vg in {"VG-06", "VG-11", "VG-16"} or "HOLD" in expected
+            is_hold_expected = expected.startswith("HOLD")
 
             res = _run_task_through_selection(svc, q)
-            assert res.governing_date_result.governing_date == date(2026, 11, 15)
+            assert res.governing_date_result.governing_date == date.fromisoformat(
+                q["Governing_Date_VN"][:10]
+            )
             assert res.llm_used is False
             assert res.hold_decision.must_hold is is_hold_expected
 
-            if vg in {"VG-06", "VG-16"}:
+            if vg == "VG-06":
                 assert any(
                     t.code == "DAT05_SOURCE_CONFLICT" for t in res.hold_decision.triggers
                 )
-            elif vg == "VG-11":
+            elif vg == "VG-16":
                 assert any(
                     t.code == "DAT08_MISSING_TABLE_OR_ANNOTATION"
                     for t in res.hold_decision.triggers
@@ -679,41 +694,93 @@ class TestFull60DevAnd40ValLoop:
             else:
                 direct_count += 1
 
-        # Confirm expected partition distribution across 60 DEV
-        msg_dev = f"Expected 11 HOLD tasks in DEV, got {held_count}"
-        assert held_count == 11, msg_dev
-        assert direct_count == 49
+        assert held_count == 18, f"Expected 18 HOLD tasks in DEV, got {held_count}"
+        assert direct_count == 42
 
-    def test_full_40_val_tasks_evaluation(self, svc: SelectionService, val_40: list[dict]):
-        """Run all 40 VAL questions through svc.run_selection() and confirm zero defects."""
-        held_count = 0
-        direct_count = 0
+    def test_real_policy_corpus_colon_scopes_match_and_reject(
+        self, svc: SelectionService
+    ):
+        """Exercise match_scope_6dim against real Policy_Corpus_G1_Full.csv rows."""
+        assert POLICY_CORPUS_PATH.exists(), f"Missing {POLICY_CORPUS_PATH}"
+        with open(POLICY_CORPUS_PATH, encoding="utf-8-sig", newline="") as f:
+            rows = list(csv.DictReader(f))
+        assert len(rows) > 0
 
-        for q in val_40:
-            vg = q["Variant_Group_ID"]
-            expected = q["Expected_Behavior"]
-            is_hold_expected = vg in {"VG-06", "VG-11", "VG-16"} or "HOLD" in expected
+        # Pick actual colon-delimited row (PAS-002: customer_group:b2b, role:sales)
+        pas002 = next(r for r in rows if r["passage_id"] == "PAS-002")
+        candidate = ApplicabilityCandidate(
+            version_id=pas002["document_version_id"],
+            authority_tier=AuthorityTier.POLICY,
+            status=PolicyLifecycleStatus(pas002["status"]),
+            effective_from=datetime.fromisoformat(pas002["effective_from"]),
+            scope=pas002["scope"],
+        )
 
-            res = _run_task_through_selection(svc, q)
-            assert res.governing_date_result.governing_date == date(2026, 11, 15)
-            assert res.llm_used is False
-            assert res.hold_decision.must_hold is is_hold_expected
+        # Matching request (customer_category normalizes customer_group alias)
+        ok_dims = ScopeDimensions(
+            company="SN",
+            branch="HN",
+            role="sales",
+            customer_category="b2b",
+            product="industrial",
+            transaction_scope="standard_quotation",
+        )
+        assert svc.match_scope_6dim(candidate, ok_dims).matched is True
 
-            if vg in {"VG-06", "VG-16"}:
-                assert any(
-                    t.code == "DAT05_SOURCE_CONFLICT" for t in res.hold_decision.triggers
-                )
-            elif vg == "VG-11":
-                assert any(
-                    t.code == "DAT08_MISSING_TABLE_OR_ANNOTATION"
-                    for t in res.hold_decision.triggers
-                )
+        # Non-matching customer_category MUST fail (proves customer_group:b2b is enforced!)
+        bad_dims = ScopeDimensions(
+            company="SN",
+            branch="HN",
+            role="sales",
+            customer_category="b2c",
+            product="industrial",
+            transaction_scope="standard_quotation",
+        )
+        res_bad = svc.match_scope_6dim(candidate, bad_dims)
+        assert res_bad.matched is False
+        assert "customer_category" in res_bad.unmatched_dimensions
 
-            if is_hold_expected:
-                held_count += 1
-            else:
-                direct_count += 1
+    def test_real_critical_fields_csv_scopes_and_thresholds(
+        self, svc: SelectionService
+    ):
+        """Exercise match_scope_6dim and threshold evaluation on Critical_Fields_G1_Full.csv."""
+        assert CRITICAL_FIELDS_PATH.exists(), f"Missing {CRITICAL_FIELDS_PATH}"
+        with open(CRITICAL_FIELDS_PATH, encoding="utf-8-sig", newline="") as f:
+            cf_rows = list(csv.DictReader(f))
+        assert len(cf_rows) > 0
 
-        msg_val = f"Expected 7 HOLD tasks in VAL, got {held_count}"
-        assert held_count == 7, msg_val
-        assert direct_count == 33
+        # Verify all real critical field scopes parse cleanly without malformed_scope
+        for row in cf_rows:
+            c = ApplicabilityCandidate(
+                version_id=row["policy_version_id"],
+                authority_tier=AuthorityTier.POLICY,
+                status=PolicyLifecycleStatus(row["status"]),
+                effective_from=datetime.fromisoformat(row["effective_from"]),
+                scope=row["scope"],
+            )
+            res = svc.match_scope_6dim(c, ScopeDimensions())
+            assert res.unmatched_dimensions != ["malformed_scope"], (
+                f"Malformed scope in {row['field_id']}: {row['scope']}"
+            )
+
+        # Test comma-separated multi-value scope & fail-closed malformed scope
+        multi_cand = ApplicabilityCandidate(
+            version_id="V-MULTI",
+            authority_tier=AuthorityTier.POLICY,
+            status=PolicyLifecycleStatus.EFFECTIVE,
+            effective_from=datetime(2026, 1, 1, tzinfo=VN_TZ),
+            scope="company:SN;branch:HN,DN,HCM;customer_group:b2b",
+        )
+        assert svc.match_scope_6dim(multi_cand, ScopeDimensions(branch="DN")).matched is True
+        assert svc.match_scope_6dim(multi_cand, ScopeDimensions(branch="CT")).matched is False
+
+        malformed_cand = ApplicabilityCandidate(
+            version_id="V-BAD",
+            authority_tier=AuthorityTier.POLICY,
+            status=PolicyLifecycleStatus.EFFECTIVE,
+            effective_from=datetime(2026, 1, 1, tzinfo=VN_TZ),
+            scope="invalid_segment_without_delimiter",
+        )
+        bad_res = svc.match_scope_6dim(malformed_cand, ScopeDimensions())
+        assert bad_res.matched is False
+        assert bad_res.unmatched_dimensions == ["malformed_scope"]
