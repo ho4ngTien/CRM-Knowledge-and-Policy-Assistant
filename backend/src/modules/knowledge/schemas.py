@@ -26,6 +26,7 @@ class PassageSummary(BaseModel):
     effective_from: datetime
     effective_to: datetime | None = None
     supersedes: str | None = None
+    is_tombstoned: bool = False
 
 
 class DocumentLineageResponse(BaseModel):

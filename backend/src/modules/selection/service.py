@@ -115,17 +115,8 @@ def _get_synonym_family(value: str) -> set[str]:
     return syns
 
 
-def _dim_matches(request_val: str | None, policy_val: str | None) -> bool:
-    """Return True when the policy dimension is compatible with the requested value.
-
-    Rules (DAT 04 / VN 01 / SUB08):
-    1. If the policy dimension is a wildcard → always matches.
-    2. If the request did not specify the dimension (None) → always matches.
-    3. Exact match after VN 01 unaccent normalization.
-    4. Match via approved SUB08 Vietnamese CRM synonym or technical terms glossary.
-    """
-    if policy_val is None:
-        return True
+def _single_dim_matches(request_val: str | None, policy_val: str) -> bool:
+    """Match a single policy dimension value against the requested value."""
     norm_policy = _normalize_dim_token(policy_val)
     if norm_policy in _WILDCARD_VALUES:
         return True
@@ -138,6 +129,26 @@ def _dim_matches(request_val: str | None, policy_val: str | None) -> bool:
     policy_syns = _get_synonym_family(policy_val)
     request_syns = _get_synonym_family(request_val)
     return bool(policy_syns & request_syns)
+
+
+def _dim_matches(request_val: str | None, policy_val: str | None) -> bool:
+    """Return True when the policy dimension is compatible with the requested value.
+
+    Rules (DAT 04 / VN 01 / SUB08):
+    1. If the policy dimension is a wildcard → always matches.
+    2. If the request did not specify the dimension (None) → always matches.
+    3. Comma-separated multi-values (e.g. ``HN,DN,HCM``) match if any item matches.
+    4. Exact match after VN 01 unaccent normalization.
+    5. Match via approved SUB08 Vietnamese CRM synonym or technical terms glossary.
+    """
+    if policy_val is None:
+        return True
+    if "," in policy_val:
+        items = [item.strip() for item in policy_val.split(",") if item.strip()]
+        if not items:
+            return False
+        return any(_single_dim_matches(request_val, item) for item in items)
+    return _single_dim_matches(request_val, policy_val)
 
 
 # ---------------------------------------------------------------------------
@@ -212,11 +223,33 @@ class SelectionService:
             ScopeMatchResult – ``matched=True`` only when ALL 6 dimensions pass.
         """
         scope_map: dict[str, str] = {}
-        for part in candidate.scope.split(";"):
-            part = part.strip()
-            if "=" in part:
+        for raw_part in candidate.scope.split(";"):
+            part = raw_part.strip()
+            if not part:
+                continue
+            colon_idx = part.find(":")
+            eq_idx = part.find("=")
+            if colon_idx == -1 and eq_idx == -1:
+                return ScopeMatchResult(
+                    version_id=candidate.version_id,
+                    matched=False,
+                    unmatched_dimensions=["malformed_scope"],
+                )
+            if colon_idx != -1 and (eq_idx == -1 or colon_idx < eq_idx):
+                key, _, val = part.partition(":")
+            else:
                 key, _, val = part.partition("=")
-                scope_map[key.strip().lower()] = val.strip().lower()
+            norm_key = key.strip().lower()
+            norm_val = val.strip().lower()
+            if not norm_key or not norm_val:
+                return ScopeMatchResult(
+                    version_id=candidate.version_id,
+                    matched=False,
+                    unmatched_dimensions=["malformed_scope"],
+                )
+            if norm_key == "customer_group":
+                norm_key = "customer_category"
+            scope_map[norm_key] = norm_val
 
         dim_values: dict[str, str | None] = {
             "company": dimensions.company,
@@ -319,13 +352,11 @@ class SelectionService:
                 elif (
                     cf.field_type == CriticalFieldType.CURRENCY
                     and not (cf.currency or "").strip()
-                    and not (cf.unit or "").strip()
                 ):
-                    missing_ann.append(f"{cf.field_id} (thiếu currency/unit)")
+                    missing_ann.append(f"{cf.field_id} (thiếu currency)")
                 elif (
                     cf.field_type in {CriticalFieldType.NUMBER, CriticalFieldType.DURATION}
                     and not (cf.unit or "").strip()
-                    and not (cf.currency or "").strip()
                 ):
                     missing_ann.append(f"{cf.field_id} (thiếu unit)")
 
@@ -397,7 +428,7 @@ class SelectionService:
             parts = num_str.split(".")
             int_part = parts[0].lstrip("+-")
             if (
-                len(parts) > 1
+                len(parts) >= 3
                 and 1 <= len(int_part) <= 3
                 and int_part != "0"
                 and all(len(p) == 3 for p in parts[1:])
@@ -431,12 +462,32 @@ class SelectionService:
             "=": ComparisonOperator.EQ,
             "eq": ComparisonOperator.EQ,
             "between": ComparisonOperator.BETWEEN,
+            "in": ComparisonOperator.IN,
+            "required": ComparisonOperator.REQUIRED,
         }
         resolved_op = op_map.get(op_str)
         if resolved_op is None:
             raise ValueError(f"Unsupported comparison operator: {operator}")
 
+        if resolved_op == ComparisonOperator.REQUIRED:
+            if isinstance(actual, bool):
+                return False
+            if isinstance(actual, float):
+                return math.isfinite(actual)
+            if isinstance(actual, Decimal):
+                return actual.is_finite()
+            if isinstance(actual, int):
+                return True
+            return bool(str(actual).strip())
+
         actual_dec = self._parse_decimal(actual)
+
+        if resolved_op == ComparisonOperator.IN:
+            sep = ";" if ";" in target else ","
+            items = [part.strip() for part in target.split(sep) if part.strip()]
+            if not items:
+                return False
+            return any(actual_dec == self._parse_decimal(item) for item in items)
 
         if resolved_op == ComparisonOperator.BETWEEN:
             low_s, high_s = [part.strip() for part in target.split(";", maxsplit=1)]
@@ -647,7 +698,11 @@ class SelectionService:
             )
             matched_version_ids = {m.version_id for m in scope_matches if m.matched}
             matched_candidates = [c for c in candidates if c.version_id in matched_version_ids]
-            applicable_ids = [m.version_id for m in scope_matches if m.matched]
+            applicable_ids = [
+                c.version_id
+                for c in matched_candidates
+                if c.authority_tier != AuthorityTier.STAFF_NOTE
+            ]
 
         # Step 3: Critical field lookup for applicable versions
         cf_lookup_results: list[CriticalFieldLookupResult] = []

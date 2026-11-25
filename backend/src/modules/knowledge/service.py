@@ -15,8 +15,37 @@ from src.modules.knowledge.schemas import (
     SnapshotAgeResponse,
 )
 from src.shared.auth import AuthenticatedUser, check_policy_audience
-from src.shared.enums import AuthorityTier, PolicyFamily, PolicyLifecycleStatus
+from src.shared.enums import AuthorityTier, PolicyFamily, PolicyLifecycleStatus, UserRole
 from src.shared.exceptions import AccessDenied, PolicyNotFound, PolicyWithdrawn
+
+_PRIVILEGED_KNOWLEDGE_ROLES: frozenset[UserRole] = frozenset(
+    {
+        UserRole.POLICY_OWNER,
+        UserRole.STEWARD,
+        UserRole.ADMINISTRATOR,
+    }
+)
+
+_UNPUBLISHED_LINEAGE_STATUSES: frozenset[str] = frozenset(
+    {
+        PolicyLifecycleStatus.DRAFT.value,
+        PolicyLifecycleStatus.OWNER_REVIEWED.value,
+        PolicyLifecycleStatus.APPROVED.value,
+        PolicyLifecycleStatus.QUARANTINED.value,
+        PolicyLifecycleStatus.FEEDBACK_CANDIDATE.value,
+    }
+)
+
+_READER_BLOCKED_PASSAGE_STATUSES: frozenset[str] = frozenset(
+    {
+        PolicyLifecycleStatus.DRAFT.value,
+        PolicyLifecycleStatus.OWNER_REVIEWED.value,
+        PolicyLifecycleStatus.APPROVED.value,
+        PolicyLifecycleStatus.SCHEDULED.value,
+        PolicyLifecycleStatus.QUARANTINED.value,
+        PolicyLifecycleStatus.FEEDBACK_CANDIDATE.value,
+    }
+)
 
 
 class KnowledgeService:
@@ -45,6 +74,12 @@ class KnowledgeService:
             raise AccessDenied("User lacks audience access to this passage.")
         if passage.is_tombstoned or passage.status == PolicyLifecycleStatus.WITHDRAWN.value:
             raise PolicyWithdrawn(f"Passage {passage_id} is withdrawn and cannot be viewed.")
+
+        is_reader_only = not bool(user.roles & _PRIVILEGED_KNOWLEDGE_ROLES)
+        if is_reader_only and passage.status in _READER_BLOCKED_PASSAGE_STATUSES:
+            raise AccessDenied(
+                f"Reader cannot access passage in '{passage.status}' lifecycle state."
+            )
         if not allow_historical and passage.status == PolicyLifecycleStatus.SUPERSEDED.value:
             raise AccessDenied("Superseded passage requires explicit historical mode.")
         return PassageSummary(
@@ -64,15 +99,40 @@ class KnowledgeService:
             effective_from=version.effective_from,
             effective_to=version.effective_to,
             supersedes=version.supersedes_version_id,
+            is_tombstoned=passage.is_tombstoned,
         )
 
     async def get_document_lineage(
-        self, db: AsyncSession, document_id: str
+        self, db: AsyncSession, user: AuthenticatedUser, document_id: str
     ) -> DocumentLineageResponse:
-        """Return full version chain including supersedes links for auditability."""
+        """Return version chain including supersedes links, guarded by audience & lifecycle RBAC."""
         doc = await db.get(Document, document_id)
         if doc is None:
             raise PolicyNotFound(f"Document {document_id} was not found.")
+
+        is_reader_only = not bool(user.roles & _PRIVILEGED_KNOWLEDGE_ROLES)
+        if is_reader_only:
+            doc_passages = (
+                (
+                    await db.execute(
+                        select(Passage).where(
+                            Passage.document_id == document_id,
+                            Passage.is_tombstoned.is_(False),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            has_permitted_passage = any(
+                check_policy_audience(
+                    user, [a.strip() for a in p.audience.split(",") if a.strip()]
+                )
+                for p in doc_passages
+            )
+            if not has_permitted_passage:
+                raise AccessDenied("User lacks audience access to this document lineage.")
+
         versions = (
             (
                 await db.execute(
@@ -84,6 +144,9 @@ class KnowledgeService:
             .scalars()
             .all()
         )
+        if is_reader_only:
+            versions = [v for v in versions if v.status not in _UNPUBLISHED_LINEAGE_STATUSES]
+
         return DocumentLineageResponse(
             document_id=doc.id,
             title=doc.title,
