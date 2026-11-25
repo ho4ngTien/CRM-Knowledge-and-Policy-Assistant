@@ -1,6 +1,6 @@
 """Policy authority, critical fields, and applicability router (/api/v1/policy/*)."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
@@ -30,12 +30,14 @@ async def list_authority_matrix(
 @router.get("/versions/{policy_version_id}/critical-fields", response_model=list[CriticalFieldItem])
 async def get_critical_fields(
     policy_version_id: str,
+    allow_historical: bool = Query(default=False),
     db: AsyncSession = Depends(get_db),
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> list[CriticalFieldItem]:
     """Fetch deterministic critical policy parameters for a policy version."""
-    _ = current_user
-    return await service.list_critical_fields(db, policy_version_id)
+    return await service.list_critical_fields(
+        db, current_user, policy_version_id, allow_historical=allow_historical
+    )
 
 
 @router.post("/threshold-check", response_model=ThresholdCheckResponse)
