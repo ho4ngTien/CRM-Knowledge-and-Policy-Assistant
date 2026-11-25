@@ -307,7 +307,7 @@ class TestSEC01AndKNW03MatrixRegression:
             PolicyLifecycleStatus.QUARANTINED,
             PolicyLifecycleStatus.FEEDBACK_CANDIDATE,
         ]
-        target_audience = "reader" if role_key == "administrator" else role_key
+        target_audience = role_key
 
         candidates = [
             _make_passage(f"P-{role_key}-{st.value}", st, [target_audience])
@@ -323,7 +323,7 @@ class TestSEC01AndKNW03MatrixRegression:
         assert all(p.status == PolicyLifecycleStatus.EFFECTIVE for p in filtered)
 
     def test_sec01_cross_role_audience_isolation_zero_leakage(self) -> None:
-        """Non-admin roles have 0% access to passages targeted at other restricted roles."""
+        """All 4 roles enforce least-privilege with 0% access to other restricted audiences."""
         retrieval_svc = RetrievalService()
         users = _make_users()
         candidates = [
@@ -337,6 +337,7 @@ class TestSEC01AndKNW03MatrixRegression:
             ("reader", "P-AUD-READER"),
             ("policy_owner", "P-AUD-OWNER"),
             ("steward", "P-AUD-STEWARD"),
+            ("administrator", "P-AUD-ADMIN"),
         ]:
             filtered = retrieval_svc.prefilter_passages(
                 users[role_key],
@@ -345,16 +346,10 @@ class TestSEC01AndKNW03MatrixRegression:
             )
             assert [p.passage_id for p in filtered] == [expected_id]
 
-        # Administrator can view all effective audiences
-        admin_filtered = retrieval_svc.prefilter_passages(
-            users["administrator"],
-            candidates,
-            governing_date=date(2026, 11, 15),
-        )
-        assert len(admin_filtered) == 4
         assert not check_policy_audience(users["reader"], ["policy_owner"])
         assert not check_policy_audience(users["policy_owner"], ["steward"])
         assert not check_policy_audience(users["steward"], ["administrator"])
+        assert not check_policy_audience(users["administrator"], ["confidential_legal"])
 
 
 # ==============================================================================

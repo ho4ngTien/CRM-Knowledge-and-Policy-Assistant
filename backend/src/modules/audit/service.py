@@ -98,15 +98,14 @@ class AuditService:
         """Check Common Bid Basis monthly package and LLM call quotas (OPS 06)."""
         target_month = month_key or datetime.now(ZoneInfo(settings.APP_TIMEZONE)).strftime("%Y-%m")
         if db is None:
-            # TODO(G1): require authoritative AsyncSession once persistent metering is wired.
             return QuotaStatus(
                 month_key=target_month,
                 packages_used=0,
                 package_quota=settings.ANSWER_MAX_PACKAGES_PER_MONTH,
                 llm_calls_used=0,
                 llm_call_quota=settings.LLM_MAX_CALLS_PER_MONTH,
-                allowed=True,
-                reason=None,
+                allowed=False,
+                reason="Authoritative database session required for OPS 06 quota check.",
             )
 
         summary = await self.summarize_month_usage(db, month_key=target_month)
@@ -149,7 +148,6 @@ class AuditService:
     ) -> None:
         """Record per-task token and call usage into UsageCostMeter (OPS 06)."""
         if db is None:
-            # TODO(G1): enforce AsyncSession persistence when DB metering lands.
             return
         month_key = datetime.now(ZoneInfo(settings.APP_TIMEZONE)).strftime("%Y-%m")
         db.add(
@@ -165,6 +163,7 @@ class AuditService:
                 estimated_cost_vnd=estimated_cost_vnd,
             )
         )
+        await db.commit()
 
     async def record_audit_event(
         self,
@@ -181,7 +180,6 @@ class AuditService:
     ) -> None:
         """Append an access-restricted audit trail record."""
         if db is None:
-            # TODO(G1): enforce AsyncSession persistence when audit wiring lands.
             return
         db.add(
             AuditLog(
@@ -195,3 +193,4 @@ class AuditService:
                 metadata_json=metadata or {},
             )
         )
+        await db.commit()

@@ -24,6 +24,14 @@ async def issue_token(payload: TokenRequest) -> TokenResponse:
     return service.exchange_token(payload.id_token)
 
 
+@router.post("/logout")
+async def logout_session(
+    current_user: AuthenticatedUser = Depends(get_current_user),
+) -> dict[str, object]:
+    """Release the authenticated user's active session slot and record SEC 08 audit."""
+    return service.logout(current_user)
+
+
 @router.get("/me", response_model=UserProfileResponse)
 async def get_my_profile(
     current_user: AuthenticatedUser = Depends(get_current_user),

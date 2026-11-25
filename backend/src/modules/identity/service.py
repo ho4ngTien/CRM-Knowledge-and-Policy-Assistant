@@ -1,6 +1,6 @@
 """Identity, 4-role IAM, session concurrency cap, and SEC 08 audit trail service."""
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import NoReturn
 from zoneinfo import ZoneInfo
 
@@ -29,8 +29,15 @@ class IdentityService:
     """Handles organizational authentication, 4-role IAM, 5-session cap, and SEC 08 audit."""
 
     def __init__(self) -> None:
-        self._active_sessions: set[str] = set()
+        self._active_sessions: dict[str, datetime] = {}
         self._audit_events: list[dict[str, object]] = []
+
+    def _prune_expired_sessions(self) -> None:
+        """Remove sessions whose JWT expiry timestamp has elapsed."""
+        now = datetime.now(UTC)
+        expired = [uid for uid, expires_at in self._active_sessions.items() if expires_at <= now]
+        for uid in expired:
+            del self._active_sessions[uid]
 
     def _record_sec08_audit(
         self,
@@ -67,12 +74,42 @@ class IdentityService:
 
     def release_session(self, user_id: str) -> None:
         """Release an active named-user session slot."""
-        self._active_sessions.discard(user_id)
+        self._active_sessions.pop(user_id, None)
+
+    def logout(self, user: AuthenticatedUser) -> dict[str, object]:
+        """Release the user's active session slot and record a SEC 08 audit event."""
+        self.release_session(user.user_id)
+        role_str = ",".join(sorted(r.value for r in user.roles))
+        self._record_sec08_audit(
+            actor_id=user.user_id,
+            actor_role=role_str,
+            action="iam.logout",
+            resource_id=user.user_id,
+            outcome="success",
+            detail="Released active session slot via logout.",
+        )
+        return {"status": "logged_out", "user_id": user.user_id}
 
     def exchange_token(self, id_token: str) -> TokenResponse:
         """Exchange a Gate G1 organizational assertion for an environment-bound JWT (SEC 01)."""
         iso = settings.verify_sec06_test_prod_isolation()
         cleaned = id_token.strip()
+        if (
+            settings.APP_ENV.strip().lower() == "production"
+            and cleaned.startswith(SSO_ASSERTION_PREFIX)
+        ):
+            self._record_sec08_audit(
+                actor_id="anonymous",
+                actor_role="unauthenticated",
+                action="iam.token_exchange",
+                resource_id="identity/token",
+                outcome="denied",
+                detail="Static G1 SSO assertion prefix is forbidden in production.",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Static G1 SSO assertion prefix is forbidden in production.",
+            )
         if not cleaned.startswith(SSO_ASSERTION_PREFIX):
             self._record_sec08_audit(
                 actor_id="anonymous",
@@ -123,6 +160,7 @@ class IdentityService:
                 detail="Assigned roles violate RULE-11-04/05 compatibility matrix.",
             )
 
+        self._prune_expired_sessions()
         if (
             user.user_id not in self._active_sessions
             and len(self._active_sessions) >= settings.PILOT_MAX_CONCURRENT_SESSIONS
@@ -145,7 +183,9 @@ class IdentityService:
                 ),
             )
 
-        self._active_sessions.add(user.user_id)
+        self._active_sessions[user.user_id] = datetime.now(UTC) + timedelta(
+            minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
+        )
         token = create_access_token(user)
         role_str = ",".join(sorted(r.value for r in user.roles))
         self._record_sec08_audit(
@@ -206,6 +246,7 @@ class IdentityService:
         self, user: AuthenticatedUser
     ) -> IamEnvironmentStatusResponse:
         """Verify SEC 06 Test/Prod isolation, SEC 04 training lock, and 4-role IAM status."""
+        self._prune_expired_sessions()
         iso = settings.verify_sec06_test_prod_isolation()
         role_str = ",".join(sorted(r.value for r in user.roles))
         self._record_sec08_audit(

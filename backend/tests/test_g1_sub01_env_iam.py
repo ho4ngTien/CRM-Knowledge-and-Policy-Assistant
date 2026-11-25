@@ -12,10 +12,12 @@ from src.shared.auth import (
     SECTION2_CORE_SYSTEM_ROLES,
     AuthenticatedUser,
     create_access_token,
+    ensure_partition_access,
     validate_compatible_roles,
     verify_access_token,
 )
-from src.shared.enums import UserRole
+from src.shared.enums import EvalPartition, UserRole
+from src.shared.exceptions import AccessDenied
 
 
 def test_g1_sub01_sec06_dev_test_isolated_from_prod_and_sec04_training_locked() -> None:
@@ -239,9 +241,77 @@ def test_g1_sub01_bdd_iam_four_roles_session_cap_and_sec08_audit_log() -> None:
 
     # 5. Verify SEC 08 audit log events were recorded for all actions.
     audit_events = identity_service.get_recent_audit_events()
-    recorded_actions = { str(e["action"]) for e in audit_events }
+    recorded_actions = {str(e["action"]) for e in audit_events}
     assert "iam.token_exchange" in recorded_actions
     assert "iam.get_profile" in recorded_actions
     assert "iam.check_audience" in recorded_actions
     assert "sec08.verify_iam_and_env_isolation" in recorded_actions
     assert "iam.concurrent_session_check" in recorded_actions
+
+
+def test_g1_sub01_logout_releases_session_slot_and_sealed100_denies_admin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify logout frees a slot, prod blocks static prefix, and SEALED_100 denies admin."""
+    identity_service.reset_sessions()
+    with TestClient(app) as client:
+        # Fill all 5 concurrent session slots
+        slot_users = [
+            "p4-tra-my",
+            "p2-huu-tai",
+            "p3-chi-kha",
+            "s5-ngoc-duy",
+            "p5-anh-khoa",
+        ]
+        tokens: dict[str, str] = {}
+        for uid in slot_users:
+            res = client.post(
+                "/api/v1/identity/token",
+                json={"id_token": f"{SSO_ASSERTION_PREFIX}{uid}"},
+            )
+            assert res.status_code == 200
+            tokens[uid] = res.json()["access_token"]
+
+        # 6th user is rejected while 5 slots are active
+        blocked = client.post(
+            "/api/v1/identity/token",
+            json={"id_token": f"{SSO_ASSERTION_PREFIX}p4-staff-sales-01"},
+        )
+        assert blocked.status_code == 429
+
+        # Logout via API releases the slot and logs SEC 08 audit event
+        logout_res = client.post(
+            "/api/v1/identity/logout",
+            headers={"Authorization": f"Bearer {tokens['p4-tra-my']}"},
+        )
+        assert logout_res.status_code == 200
+        assert logout_res.json()["status"] == "logged_out"
+
+        # 6th user can now authenticate
+        admitted = client.post(
+            "/api/v1/identity/token",
+            json={"id_token": f"{SSO_ASSERTION_PREFIX}p4-staff-sales-01"},
+        )
+        assert admitted.status_code == 200
+        assert any(
+            e["action"] == "iam.logout" for e in identity_service.get_recent_audit_events()
+        )
+
+    # Static G1 SSO prefix is rejected in production (401)
+    monkeypatch.setattr(settings, "APP_ENV", "production")
+    monkeypatch.setattr(settings, "APP_SECRET_KEY", "prod-super-strong-secret-key-2026")
+    monkeypatch.setattr(
+        settings,
+        "DATABASE_URL",
+        "postgresql+asyncpg://u:strong@db.internal:5432/ckpa_prod",
+    )
+    with pytest.raises(Exception) as exc_info:
+        identity_service.exchange_token(f"{SSO_ASSERTION_PREFIX}s5-ngoc-duy")
+    assert "Static G1 SSO assertion prefix is forbidden in production." in str(exc_info.value)
+
+    # Chinese Wall: SEALED_100 strictly denies ADMINISTRATOR and allows INDEPENDENT_EVALUATOR
+    admin_user = G1_NAMED_USERS_DIRECTORY["s5-ngoc-duy"]
+    evaluator_user = G1_NAMED_USERS_DIRECTORY["s4-quy-hai"]
+    with pytest.raises(AccessDenied):
+        ensure_partition_access(admin_user, EvalPartition.SEALED_100)
+    ensure_partition_access(evaluator_user, EvalPartition.SEALED_100)

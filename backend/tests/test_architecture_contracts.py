@@ -6,10 +6,12 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 import pytest
+from fastapi.testclient import TestClient
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+from src.main import app
 from src.modules.admin.service import AdminService
 from src.modules.answer.schemas import AnswerCitation, AnswerPackage, AnswerQueryRequest
 from src.modules.answer.service import AnswerOrchestratorService
@@ -631,7 +633,8 @@ async def test_service_scaffolds_policy_gate_snapshot_quota_and_emergency_disabl
     assert snap.is_stale is True
 
     quota = await AuditService().check_monthly_quota(None)
-    assert quota.allowed is True
+    assert quota.allowed is False
+    assert quota.reason is not None
     await AuditService().record_usage_meter(None, task_id="TASK-1")
     await AuditService().record_audit_event(
         None,
@@ -649,3 +652,11 @@ async def test_service_scaffolds_policy_gate_snapshot_quota_and_emergency_disabl
     assert toggled["disabled"] is True
     assert toggled["cache_key"] == settings.EMERGENCY_DISABLE_CACHE_KEY
     assert await admin_svc.is_emergency_disabled() is True
+
+
+def test_health_reports_13_mounted_modules() -> None:
+    """Verify /health dynamically reports all 13 mounted API modules."""
+    with TestClient(app) as client:
+        res = client.get("/health")
+    assert res.status_code == 200
+    assert res.json()["mounted_modules"] == 13
