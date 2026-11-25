@@ -96,6 +96,25 @@ class PolicyService:
         is_snapshot_stale: bool = False,
     ) -> PolicyGateDecision:
         """Evaluate Layer 2 deterministic applicability, conflict hold, and critical fields."""
+        if requested_date is None:
+            today_vn = datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date()
+            return PolicyGateDecision(
+                governing_date=today_vn,
+                timezone=settings.APP_TIMEZONE,
+                is_historical=False,
+                is_future_preview=False,
+                applicable_version_ids=(),
+                has_conflict=False,
+                can_proceed=False,
+                hold_reason=(
+                    "OPS 03 / DAT 04 Hold: Thiếu ngày chi phối (requested_date=None); "
+                    "không thể xác định phiên bản chính sách áp dụng."
+                ),
+                critical_fields=(),
+                snapshot_age_hours=snapshot_age_hours,
+                is_snapshot_stale=is_snapshot_stale,
+            )
+
         applicability = self.evaluate_candidates(
             candidates,
             requested_date=requested_date,

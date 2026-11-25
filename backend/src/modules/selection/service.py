@@ -46,7 +46,12 @@ from src.modules.selection.schemas import (
     SelectionResult,
 )
 from src.shared.contracts import PolicyGateDecision
-from src.shared.enums import AuthorityTier, ComparisonOperator, PolicyLifecycleStatus
+from src.shared.enums import (
+    AuthorityTier,
+    ComparisonOperator,
+    CriticalFieldType,
+    PolicyLifecycleStatus,
+)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -306,17 +311,30 @@ class SelectionService:
                 if len(matching) >= cap:
                     break
 
-            # DAT 08: annotation completeness check
-            missing_ann = [
-                cf.field_id
-                for cf in matching
-                if not cf.source_clause.strip() or not cf.value.strip()
-            ]
+            # DAT 08: annotation completeness and unit/currency check
+            missing_ann: list[str] = []
+            for cf in matching:
+                if not cf.source_clause.strip() or not cf.value.strip():
+                    missing_ann.append(f"{cf.field_id} (thiếu source_clause hoặc value)")
+                elif (
+                    cf.field_type == CriticalFieldType.CURRENCY
+                    and not (cf.currency or "").strip()
+                    and not (cf.unit or "").strip()
+                ):
+                    missing_ann.append(f"{cf.field_id} (thiếu currency/unit)")
+                elif (
+                    cf.field_type in {CriticalFieldType.NUMBER, CriticalFieldType.DURATION}
+                    and not (cf.unit or "").strip()
+                    and not (cf.currency or "").strip()
+                ):
+                    missing_ann.append(f"{cf.field_id} (thiếu unit)")
+
             has_missing = len(missing_ann) > 0
             missing_detail: str | None = None
             if has_missing:
                 missing_detail = (
-                    f"DAT 08: {len(missing_ann)} trường thiếu source_clause / value: "
+                    f"DAT 08: {len(missing_ann)} trường thiếu "
+                    "source_clause / value / unit / currency: "
                     + ", ".join(missing_ann[:5])
                     + ("…" if len(missing_ann) > 5 else "")
                 )
@@ -457,7 +475,7 @@ class SelectionService:
         triggers: list[HoldTrigger] = []
 
         # Effective applicable version IDs (post 6-dim scope matching when candidates provided)
-        effective_version_ids = (
+        effective_version_ids: list[str] | tuple[str, ...] = (
             applicable_version_ids
             if applicable_version_ids is not None
             else gate_decision.applicable_version_ids
@@ -465,13 +483,18 @@ class SelectionService:
 
         # --- DAT 04: No applicable policy version ---
         if not effective_version_ids:
+            reason_vi = (
+                gate_decision.hold_reason
+                if (not gate_decision.can_proceed and gate_decision.hold_reason)
+                else (
+                    "DAT 04 Hold: Không tìm thấy phiên bản chính sách hiệu lực "
+                    "cho ngày chi phối và phạm vi; cần chuyển chủ sở hữu chính sách."
+                )
+            )
             triggers.append(
                 HoldTrigger(
                     code="DAT04_NO_APPLICABLE_VERSION",
-                    reason_vi=(
-                        "DAT 04 Hold: Không tìm thấy phiên bản chính sách hiệu lực "
-                        "cho ngày chi phối và phạm vi; cần chuyển chủ sở hữu chính sách."
-                    ),
+                    reason_vi=reason_vi,
                 )
             )
 
@@ -602,16 +625,29 @@ class SelectionService:
         effective_future_preview = date_result.is_future_preview and allow_future_preview
 
         # Step 2: 6-dim scope matching
-        scope_matches = self.match_scope_6dim_bulk(
-            candidates,
-            dimensions,
-            gov_date,
-            allow_historical=effective_historical,
-            allow_future_preview=effective_future_preview,
-        )
-        matched_version_ids = {m.version_id for m in scope_matches if m.matched}
-        matched_candidates = [c for c in candidates if c.version_id in matched_version_ids]
-        applicable_ids = [m.version_id for m in scope_matches if m.matched]
+        if not gate_decision.can_proceed and not gate_decision.applicable_version_ids:
+            scope_matches = [
+                ScopeMatchResult(
+                    version_id=c.version_id,
+                    matched=False,
+                    unmatched_dimensions=list(_DIMENSION_KEYS),
+                )
+                for c in candidates
+            ]
+            matched_version_ids: set[str] = set()
+            matched_candidates: list[ApplicabilityCandidate] = []
+            applicable_ids: list[str] = []
+        else:
+            scope_matches = self.match_scope_6dim_bulk(
+                candidates,
+                dimensions,
+                gov_date,
+                allow_historical=effective_historical,
+                allow_future_preview=effective_future_preview,
+            )
+            matched_version_ids = {m.version_id for m in scope_matches if m.matched}
+            matched_candidates = [c for c in candidates if c.version_id in matched_version_ids]
+            applicable_ids = [m.version_id for m in scope_matches if m.matched]
 
         # Step 3: Critical field lookup for applicable versions
         cf_lookup_results: list[CriticalFieldLookupResult] = []

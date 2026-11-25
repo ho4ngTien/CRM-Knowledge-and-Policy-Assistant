@@ -2,8 +2,9 @@
 
 import html
 import uuid
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -272,9 +273,13 @@ class AnswerOrchestratorService:
             return await self._record_and_return(db, user, pkg)
 
         # Layer 2: Deterministic Policy Gate (VN date, conflict hold, typed critical fields).
+        effective_requested_date = (
+            request.governing_date
+            or datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date()
+        )
         gate = self._policy_gate.evaluate_policy_gate(
             candidates or [],
-            requested_date=request.governing_date,
+            requested_date=effective_requested_date,
             allow_future_preview=request.allow_future_preview,
             critical_fields=critical_fields,
         )

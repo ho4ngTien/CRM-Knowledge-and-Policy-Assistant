@@ -20,7 +20,8 @@ from fastapi.testclient import TestClient
 
 from src.config import settings
 from src.main import app
-from src.modules.policy.schemas import ApplicabilityCandidate
+from src.modules.policy.schemas import ApplicabilityCandidate, CriticalFieldItem
+from src.modules.policy.service import PolicyService
 from src.modules.retrieval.service import RetrievalService
 from src.modules.selection.o1_context import (
     CustomerContextO1,
@@ -32,7 +33,13 @@ from src.modules.selection.schemas import ScopeDimensions
 from src.modules.selection.service import SelectionService
 from src.shared.auth import AuthenticatedUser, create_access_token
 from src.shared.contracts import PolicyGateDecision
-from src.shared.enums import AuthorityTier, PolicyLifecycleStatus, UserRole
+from src.shared.enums import (
+    AuthorityTier,
+    ComparisonOperator,
+    CriticalFieldType,
+    PolicyLifecycleStatus,
+    UserRole,
+)
 
 _VN_TZ = ZoneInfo(settings.APP_TIMEZONE)
 
@@ -493,3 +500,133 @@ class TestReal100QuestionsSelectionLatency:
         # Entire 100 questions must run in < 50ms
         assert total_elapsed_ms < 50.0, f"Total 100 tasks took {total_elapsed_ms:.2f}ms"
         assert avg_per_task_ms < 0.5, f"Avg per task {avg_per_task_ms:.4f}ms exceeded 0.5ms bound"
+
+
+# ---------------------------------------------------------------------------
+# 7. Missing requested_date & DAT 08 Missing Unit / Currency Hold Tests
+# ---------------------------------------------------------------------------
+
+class TestMissingRequestedDateAndDAT08UnitCurrencyHold:
+    """Validate PolicyGate requested_date=None and Selection DAT 08 unit/currency checks."""
+
+    def test_policy_gate_returns_empty_when_requested_date_is_none(self) -> None:
+        """When requested_date=None, gate must fail-closed with empty versions & fields."""
+        cand = _make_candidate(
+            version_id="POL-ACTIVE-NOW",
+            effective_from=date(2026, 1, 1),
+            effective_to=date(2026, 12, 31),
+        )
+        cf = CriticalFieldItem(
+            field_id="CF-01",
+            policy_id="POL-01",
+            policy_version_id="POL-ACTIVE-NOW",
+            document_version_id="DOC-01",
+            field_name="max_discount",
+            field_type=CriticalFieldType.NUMBER,
+            operator=ComparisonOperator.LE,
+            value="10",
+            unit="%",
+            approval_role="QLBH",
+            source_clause="Điều 3.1",
+            status=PolicyLifecycleStatus.EFFECTIVE,
+        )
+        gate = PolicyService().evaluate_policy_gate(
+            [cand],
+            requested_date=None,
+            critical_fields=[cf],
+        )
+        assert gate.can_proceed is False
+        assert gate.applicable_version_ids == ()
+        assert gate.critical_fields == ()
+
+    def test_selection_holds_when_requested_date_is_none(self) -> None:
+        """SelectionService must hold when PolicyGate fails due to requested_date=None."""
+        cand = _make_candidate(
+            version_id="POL-ACTIVE-NOW",
+            effective_from=date(2026, 1, 1),
+            effective_to=date(2026, 12, 31),
+        )
+        gate = PolicyService().evaluate_policy_gate([cand], requested_date=None)
+        res = SelectionService().run_selection(
+            candidates=[cand],
+            dimensions=ScopeDimensions(),
+            all_critical_fields=[],
+            gate_decision=gate,
+            requested_date=None,
+        )
+        assert res.applicable_version_ids == []
+        assert res.hold_decision.must_hold is True
+        assert any(
+            t.code == "DAT04_NO_APPLICABLE_VERSION"
+            for t in res.hold_decision.triggers
+        )
+
+    def test_dat08_missing_unit_or_currency_triggers_hold(self) -> None:
+        """Missing unit on NUMBER/DURATION or currency on CURRENCY triggers DAT 08 Hold."""
+        gov_date = date(2026, 11, 15)
+        cand = _make_candidate(version_id="VER-DAT08-UNIT")
+        gate = PolicyService().evaluate_policy_gate([cand], requested_date=gov_date)
+        sel_svc = SelectionService()
+
+        # Case 1: NUMBER field with non-empty value & source_clause, but missing unit & currency
+        cf_no_unit = CriticalFieldItem(
+            field_id="CF-NO-UNIT",
+            policy_id="POL-01",
+            policy_version_id="VER-DAT08-UNIT",
+            document_version_id="DOC-01",
+            field_name="power_threshold",
+            field_type=CriticalFieldType.NUMBER,
+            operator=ComparisonOperator.GE,
+            value="50",
+            unit=None,
+            currency=None,
+            approval_role="GDCN",
+            source_clause="Điều 4.2",
+            status=PolicyLifecycleStatus.EFFECTIVE,
+        )
+        res_no_unit = sel_svc.run_selection(
+            candidates=[cand],
+            dimensions=ScopeDimensions(),
+            all_critical_fields=[cf_no_unit],
+            gate_decision=gate,
+            requested_date=gov_date,
+        )
+        assert res_no_unit.hold_decision.must_hold is True
+        assert any(
+            t.code == "DAT08_MISSING_TABLE_OR_ANNOTATION"
+            for t in res_no_unit.hold_decision.triggers
+        )
+
+        # Case 2: CURRENCY field missing currency & unit
+        cf_no_curr = cf_no_unit.model_copy(
+            update={
+                "field_id": "CF-NO-CURR",
+                "field_type": CriticalFieldType.CURRENCY,
+                "value": "500000000",
+                "unit": None,
+                "currency": None,
+            }
+        )
+        res_no_curr = sel_svc.run_selection(
+            candidates=[cand],
+            dimensions=ScopeDimensions(),
+            all_critical_fields=[cf_no_curr],
+            gate_decision=gate,
+            requested_date=gov_date,
+        )
+        assert res_no_curr.hold_decision.must_hold is True
+        assert any(
+            t.code == "DAT08_MISSING_TABLE_OR_ANNOTATION"
+            for t in res_no_curr.hold_decision.triggers
+        )
+
+        # Case 3: CURRENCY field with explicit currency="VND" passes cleanly
+        cf_valid_curr = cf_no_curr.model_copy(update={"currency": "VND"})
+        res_valid = sel_svc.run_selection(
+            candidates=[cand],
+            dimensions=ScopeDimensions(),
+            all_critical_fields=[cf_valid_curr],
+            gate_decision=gate,
+            requested_date=gov_date,
+        )
+        assert res_valid.hold_decision.must_hold is False
