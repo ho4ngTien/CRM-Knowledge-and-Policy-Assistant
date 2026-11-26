@@ -1,6 +1,6 @@
 """Knowledge repository services enforcing corpus bounds and audience isolation."""
 
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -31,6 +31,8 @@ _UNPUBLISHED_LINEAGE_STATUSES: frozenset[str] = frozenset(
         PolicyLifecycleStatus.DRAFT.value,
         PolicyLifecycleStatus.OWNER_REVIEWED.value,
         PolicyLifecycleStatus.APPROVED.value,
+        PolicyLifecycleStatus.SCHEDULED.value,
+        PolicyLifecycleStatus.WITHDRAWN.value,
         PolicyLifecycleStatus.QUARANTINED.value,
         PolicyLifecycleStatus.FEEDBACK_CANDIDATE.value,
     }
@@ -46,6 +48,17 @@ _READER_BLOCKED_PASSAGE_STATUSES: frozenset[str] = frozenset(
         PolicyLifecycleStatus.FEEDBACK_CANDIDATE.value,
     }
 )
+
+
+def _today_vn() -> date:
+    return datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date()
+
+
+def _to_vn_date(dt: datetime) -> date:
+    tz = ZoneInfo(settings.APP_TIMEZONE)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=tz).date()
+    return dt.astimezone(tz).date()
 
 
 class KnowledgeService:
@@ -72,15 +85,30 @@ class KnowledgeService:
         audiences = [a.strip() for a in passage.audience.split(",") if a.strip()]
         if not check_policy_audience(user, audiences):
             raise AccessDenied("User lacks audience access to this passage.")
-        if passage.is_tombstoned or passage.status == PolicyLifecycleStatus.WITHDRAWN.value:
+        version_status = getattr(version, "status", None)
+        if (
+            passage.is_tombstoned
+            or passage.status == PolicyLifecycleStatus.WITHDRAWN.value
+            or version_status == PolicyLifecycleStatus.WITHDRAWN.value
+        ):
             raise PolicyWithdrawn(f"Passage {passage_id} is withdrawn and cannot be viewed.")
 
         is_reader_only = not bool(user.roles & _PRIVILEGED_KNOWLEDGE_ROLES)
-        if is_reader_only and passage.status in _READER_BLOCKED_PASSAGE_STATUSES:
+        if is_reader_only and (
+            passage.status in _READER_BLOCKED_PASSAGE_STATUSES
+            or version_status in _READER_BLOCKED_PASSAGE_STATUSES
+        ):
             raise AccessDenied(
                 f"Reader cannot access passage in '{passage.status}' lifecycle state."
             )
-        if not allow_historical and passage.status == PolicyLifecycleStatus.SUPERSEDED.value:
+        if is_reader_only and _to_vn_date(version.effective_from) > _today_vn():
+            raise AccessDenied(
+                "Reader cannot access passage before its effective_from date (Asia/Ho_Chi_Minh)."
+            )
+        if not allow_historical and (
+            passage.status == PolicyLifecycleStatus.SUPERSEDED.value
+            or version_status == PolicyLifecycleStatus.SUPERSEDED.value
+        ):
             raise AccessDenied("Superseded passage requires explicit historical mode.")
         return PassageSummary(
             passage_id=passage.id,
@@ -111,27 +139,7 @@ class KnowledgeService:
             raise PolicyNotFound(f"Document {document_id} was not found.")
 
         is_reader_only = not bool(user.roles & _PRIVILEGED_KNOWLEDGE_ROLES)
-        if is_reader_only:
-            doc_passages = (
-                (
-                    await db.execute(
-                        select(Passage).where(
-                            Passage.document_id == document_id,
-                            Passage.is_tombstoned.is_(False),
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            has_permitted_passage = any(
-                check_policy_audience(
-                    user, [a.strip() for a in p.audience.split(",") if a.strip()]
-                )
-                for p in doc_passages
-            )
-            if not has_permitted_passage:
-                raise AccessDenied("User lacks audience access to this document lineage.")
+        today_vn = _today_vn()
 
         versions = (
             (
@@ -144,8 +152,41 @@ class KnowledgeService:
             .scalars()
             .all()
         )
+
         if is_reader_only:
-            versions = [v for v in versions if v.status not in _UNPUBLISHED_LINEAGE_STATUSES]
+            versions = [
+                v
+                for v in versions
+                if getattr(v, "status", None) not in _UNPUBLISHED_LINEAGE_STATUSES
+                and getattr(v, "effective_from", None) is not None
+                and _to_vn_date(v.effective_from) <= today_vn
+            ]
+            if not versions:
+                raise AccessDenied("User lacks access to any published version of this document.")
+
+            visible_version_ids = {v.id for v in versions}
+            doc_passages = (
+                (
+                    await db.execute(
+                        select(Passage).where(
+                            Passage.document_id == document_id,
+                            Passage.is_tombstoned.is_(False),
+                            Passage.status.notin_(_UNPUBLISHED_LINEAGE_STATUSES),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            has_permitted_passage = any(
+                getattr(p, "document_version_id", None) in visible_version_ids
+                and check_policy_audience(
+                    user, [a.strip() for a in p.audience.split(",") if a.strip()]
+                )
+                for p in doc_passages
+            )
+            if not has_permitted_passage:
+                raise AccessDenied("User lacks audience access to this document lineage.")
 
         return DocumentLineageResponse(
             document_id=doc.id,
