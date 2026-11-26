@@ -1,6 +1,8 @@
 """Celery application — background jobs for import, indexing, evaluation."""
-from celery import Celery
+
 import os
+
+from celery import Celery
 
 app = Celery(
     "ckpa-worker",

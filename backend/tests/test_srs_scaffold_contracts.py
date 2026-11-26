@@ -46,7 +46,7 @@ def test_all_12_routers_mounted_and_health_contract() -> None:
     assert res.status_code == 200
     body = res.json()
     assert body["status"] == "ok"
-    assert body["mounted_modules"] == 12
+    assert body["mounted_modules"] == 13
     assert body["timezone"] == "Asia/Ho_Chi_Minh"
     assert body["streaming_enabled"] is False
     assert "o1_crm_context_enabled" not in body
@@ -58,6 +58,7 @@ def test_all_12_routers_mounted_and_health_contract() -> None:
         "ingestion",
         "policy",
         "retrieval",
+        "selection",
         "answer",
         "validation",
         "referral",

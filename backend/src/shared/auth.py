@@ -322,8 +322,6 @@ def require_roles(
 
 def check_policy_audience(user: AuthenticatedUser, record_audiences: list[str]) -> bool:
     """Enforce consistent audience filtering across pre-retrieval, generation, and display (SEC 01)."""  # noqa: E501
-    if UserRole.ADMINISTRATOR in user.roles or "administrator" in user.allowed_audiences:
-        return True
     normalized: set[str] = set()
     for item in record_audiences:
         if not item:
@@ -346,7 +344,7 @@ def check_policy_audience(user: AuthenticatedUser, record_audiences: list[str]) 
 def ensure_partition_access(user: AuthenticatedUser, partition: EvalPartition) -> None:
     """Enforce Chinese Wall isolation on the 100 Sealed evaluation partition."""
     if partition == EvalPartition.SEALED_100 and not (
-        user.roles & {UserRole.INDEPENDENT_EVALUATOR, UserRole.ADMINISTRATOR}
+        user.roles & {UserRole.INDEPENDENT_EVALUATOR}
     ):
         raise AccessDenied(
             "Chinese Wall violation: sealed_100 restricted to independent_evaluator."

@@ -8,7 +8,7 @@ Traceability:
 
 from __future__ import annotations
 
-import json
+import csv
 import time
 from datetime import date, datetime
 from pathlib import Path
@@ -454,51 +454,51 @@ class TestOptionO1IntegrationWithSelectionScope:
 
 
 # ---------------------------------------------------------------------------
-# 6. Real 100 Questions Selection Latency Test (OPS 03, SLA)
+# 6. Real 60 DEV Tasks Selection Latency Test (OPS 03, SLA, Chinese Wall)
 # ---------------------------------------------------------------------------
 
-class TestReal100QuestionsSelectionLatency:
-    """Benchmark Selection execution across the full 100 Real Questions corpus."""
+class TestReal60DevTasksSelectionLatency:
+    """Benchmark Selection execution across the 60 non-leaking DEV tasks corpus."""
 
-    def test_full_100_questions_latency_under_50ms(self) -> None:
-        """Confirm that 100 questions evaluate through Selection in < 50ms (avg < 0.5ms/task)."""
+    def test_full_60_dev_tasks_latency_under_50ms(self) -> None:
+        """Confirm that 60 DEV tasks evaluate through Selection in < 50ms (avg < 0.5ms/task)."""
         base_dir = Path(__file__).resolve().parents[2]
-        dataset_path = base_dir / "data" / "eval" / "100_real_questions_clean_pii.json"
+        dataset_path = base_dir / "data" / "eval" / "60_dev_tasks_nonleaking_clean_pii.csv"
         assert dataset_path.is_file(), f"Dataset not found at {dataset_path}"
 
-        with open(dataset_path, encoding="utf-8") as f:
-            data = json.load(f)
+        with open(dataset_path, encoding="utf-8", newline="") as f:
+            data = list(csv.DictReader(f))
 
-        assert len(data) == 100
+        assert len(data) == 60
         svc = SelectionService()
 
-        # Dummy candidate pool
-        dummy_candidates = [
+        # Colon-delimited candidate pool matching real Policy_Corpus_G1_Full format
+        corpus_candidates = [
             _make_candidate(
                 version_id=f"POL-TEST-{i}",
                 authority_tier=AuthorityTier.POLICY,
                 status=PolicyLifecycleStatus.EFFECTIVE,
-                scope="branch=all;customer_category=all",
+                scope="company:SN;branch:all;customer_group:b2b",
             )
             for i in range(5)
         ]
 
         start = time.perf_counter()
         for q in data:
-            requested_d = date.fromisoformat(q["Governing_Date"])
+            requested_d = date.fromisoformat(q["Governing_Date_VN"][:10])
             gov_date_res = svc.resolve_governing_date_vn(requested_d)
-            scope = ScopeDimensions(branch="all", customer_category="b2b")
+            scope = ScopeDimensions(company="SN", branch="all", customer_category="b2b")
             svc.match_scope_6dim_bulk(
-                dummy_candidates,
+                corpus_candidates,
                 scope,
                 gov_date_res.governing_date,
             )
 
         total_elapsed_ms = (time.perf_counter() - start) * 1000
-        avg_per_task_ms = total_elapsed_ms / 100
+        avg_per_task_ms = total_elapsed_ms / len(data)
 
-        # Entire 100 questions must run in < 50ms
-        assert total_elapsed_ms < 50.0, f"Total 100 tasks took {total_elapsed_ms:.2f}ms"
+        # Entire 60 DEV tasks must run in < 50ms
+        assert total_elapsed_ms < 50.0, f"Total 60 tasks took {total_elapsed_ms:.2f}ms"
         assert avg_per_task_ms < 0.5, f"Avg per task {avg_per_task_ms:.4f}ms exceeded 0.5ms bound"
 
 

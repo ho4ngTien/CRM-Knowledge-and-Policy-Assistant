@@ -55,6 +55,14 @@ _PATTERN_PRESERVED_NEG = re.compile(
 )
 
 
+def _to_vn_date(dt: datetime | date, tz: ZoneInfo) -> date:
+    """Convert datetime/date to VN calendar date, localizing naive datetimes to VN TZ."""
+    if isinstance(dt, datetime):
+        localized = dt.astimezone(tz) if dt.tzinfo is not None else dt.replace(tzinfo=tz)
+        return localized.date()
+    return dt
+
+
 class RetrievalService:
     """Filters by permission/lifecycle before ranking and preserves Vietnamese negations."""
 
@@ -134,10 +142,10 @@ class RetrievalService:
         limit = min(top_k or settings.ANSWER_MAX_PASSAGES, settings.ANSWER_MAX_PASSAGES)
         filtered: list[PassageSummary] = []
 
+        tz = ZoneInfo(settings.APP_TIMEZONE)
         target_date = governing_date
         if target_date is None:
-            now_tz = datetime.now(ZoneInfo(settings.APP_TIMEZONE))
-            target_date = now_tz.date()
+            target_date = datetime.now(tz).date()
 
         for p in candidates:
             # 1. RBAC & Audience Isolation (SEC 01)
@@ -160,8 +168,8 @@ class RetrievalService:
                     continue
 
             # 5. Strict 7-State Policy Lifecycle Filtering (KNW 03)
-            # 5a. Withdrawn is STRICT FAIL-CLOSED (Cấm tuyệt đối - không thể bypass)
-            if p.status == PolicyLifecycleStatus.WITHDRAWN:
+            # 5a. Withdrawn or tombstoned is STRICT FAIL-CLOSED
+            if p.is_tombstoned or p.status == PolicyLifecycleStatus.WITHDRAWN:
                 continue
 
             # 5b. Ingestion / Governance / Pre-publication states are 100% rejected
@@ -178,11 +186,7 @@ class RetrievalService:
             if p.status == PolicyLifecycleStatus.SCHEDULED:
                 if not allow_future_preview:
                     continue
-                eff_start = (
-                    p.effective_from.date()
-                    if isinstance(p.effective_from, datetime)
-                    else p.effective_from
-                )
+                eff_start = _to_vn_date(p.effective_from, tz)
                 if target_date < eff_start and not allow_future_preview:
                     continue
 
@@ -191,38 +195,22 @@ class RetrievalService:
                 if not allow_historical:
                     continue
                 if target_date is not None:
-                    eff_start = (
-                        p.effective_from.date()
-                        if isinstance(p.effective_from, datetime)
-                        else p.effective_from
-                    )
+                    eff_start = _to_vn_date(p.effective_from, tz)
                     if target_date < eff_start:
                         continue
                     if p.effective_to is not None:
-                        eff_end = (
-                            p.effective_to.date()
-                            if isinstance(p.effective_to, datetime)
-                            else p.effective_to
-                        )
+                        eff_end = _to_vn_date(p.effective_to, tz)
                         if target_date > eff_end:
                             continue
 
             # 5e. Effective policies (current active)
             elif p.status == PolicyLifecycleStatus.EFFECTIVE:
                 if target_date is not None:
-                    eff_start = (
-                        p.effective_from.date()
-                        if isinstance(p.effective_from, datetime)
-                        else p.effective_from
-                    )
+                    eff_start = _to_vn_date(p.effective_from, tz)
                     if target_date < eff_start:
                         continue
                     if p.effective_to is not None:
-                        eff_end = (
-                            p.effective_to.date()
-                            if isinstance(p.effective_to, datetime)
-                            else p.effective_to
-                        )
+                        eff_end = _to_vn_date(p.effective_to, tz)
                         if target_date > eff_end:
                             continue
 
@@ -307,5 +295,6 @@ class RetrievalService:
                 effective_from=version.effective_from,
                 effective_to=version.effective_to,
                 supersedes=version.supersedes_version_id,
+                is_tombstoned=passage.is_tombstoned,
             )
         return authoritative

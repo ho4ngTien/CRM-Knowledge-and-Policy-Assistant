@@ -20,13 +20,14 @@ from src.modules.ingestion.models import (
 from src.modules.ingestion.service import (
     MANIFEST_CSV_COLUMNS,
     PASSAGES_CSV_COLUMNS,
+    CorpusCeilingExceeded,
     IdempotencyKeyConflict,
     IngestionService,
     StaleBatchRejected,
 )
 from src.modules.knowledge.models import Document, DocumentVersion, Passage
-from src.modules.policy.models import CriticalField
-from src.shared.enums import BatchType
+from src.modules.policy.models import CriticalField, Policy, PolicyVersion
+from src.shared.enums import BatchType, PolicyFamily
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FAMILY1 = REPO_ROOT / "data" / "g1" / "family1"
@@ -230,6 +231,8 @@ async def test_import_persists_accepted_rows_manifest_and_quarantine() -> None:
         ImportManifest.__table__,
         ImportRecord.__table__,
         QuarantineRow.__table__,
+        Policy.__table__,
+        PolicyVersion.__table__,
         CriticalField.__table__,
         Document.__table__,
         DocumentVersion.__table__,
@@ -300,6 +303,8 @@ async def test_import_rejects_idempotency_key_reuse_with_different_content() -> 
         Document.__table__,
         DocumentVersion.__table__,
         Passage.__table__,
+        Policy.__table__,
+        PolicyVersion.__table__,
         CriticalField.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
@@ -399,6 +404,10 @@ async def test_stale_batch_is_rejected_before_authoritative_apply() -> None:
         ImportManifest.__table__,
         ImportRecord.__table__,
         QuarantineRow.__table__,
+        Document.__table__,
+        DocumentVersion.__table__,
+        Policy.__table__,
+        PolicyVersion.__table__,
         CriticalField.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
@@ -483,3 +492,200 @@ async def test_delta_missing_rows_are_not_tombstoned() -> None:
         remaining = session.get(Passage, "PAS-MISSING")
         assert remaining is not None
         assert remaining.is_tombstoned is False
+
+
+def test_higher_version_compares_numeric_tuples() -> None:
+    assert SERVICE._higher_version("v1.10", "v1.2") is True
+    assert SERVICE._higher_version("v1.2", "v1.10") is False
+    assert SERVICE._higher_version("DOC-002:VER-010", "DOC-002:VER-002") is True
+    assert SERVICE._higher_version("beta", "alpha") is True
+
+
+@pytest.mark.asyncio
+async def test_composite_doc_version_id_prevents_cross_document_collision() -> None:
+    headers, rows = _read_csv((FAMILY1 / "Policy_Corpus_Family1.csv").read_bytes())
+    row_a = dict(rows[0])
+    row_a["passage_id"] = "PAS-COL-1"
+    row_a["document_id"] = "DOC-001"
+    row_a["document_version_id"] = "VER-001"
+    row_b = dict(rows[0])
+    row_b["passage_id"] = "PAS-COL-2"
+    row_b["document_id"] = "DOC-002"
+    row_b["document_version_id"] = "VER-001"
+    row_b["title"] = "Chính sách Bảo mật Thông tin Khách hàng"
+    batch_rows = [row_a, row_b]
+    raw_bytes = _serialize_csv(tuple(headers), batch_rows)
+    manifest = _manifest_for(batch_rows, "passages")
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    tables = [
+        ImportBatch.__table__,
+        ImportManifest.__table__,
+        ImportRecord.__table__,
+        QuarantineRow.__table__,
+        Document.__table__,
+        DocumentVersion.__table__,
+        Passage.__table__,
+    ]
+    Base.metadata.create_all(engine, tables=tables)
+    with Session(engine) as session:
+        db = _AsyncSessionAdapter(session)
+        await SERVICE.import_csv_bytes(
+            db,
+            raw_bytes,
+            source_type="passages",
+            batch_type=BatchType.FULL_SNAPSHOT,
+            expected_rows=2,
+            manifest_bytes=manifest,
+            idempotency_key="composite-doc-ver-test",
+            submitted_by="steward-1",
+            batch_timestamp=datetime(2026, 11, 24, 10, 0, tzinfo=UTC),
+        )
+        p1 = session.get(Passage, "PAS-COL-1")
+        p2 = session.get(Passage, "PAS-COL-2")
+        doc1 = session.get(Document, "DOC-001")
+        doc2 = session.get(Document, "DOC-002")
+        assert p1 is not None and p2 is not None
+        assert p1.document_version_id == "DOC-001:VER-001"
+        assert p2.document_version_id == "DOC-002:VER-001"
+        assert session.get(DocumentVersion, "DOC-001:VER-001") is not None
+        assert session.get(DocumentVersion, "DOC-002:VER-001") is not None
+        assert doc1 is not None and doc1.policy_family == PolicyFamily.COMMERCIAL_QUOTING_APPROVAL
+        assert doc2 is not None and doc2.policy_family == PolicyFamily.CUSTOMER_INFO_HANDLING
+
+
+@pytest.mark.asyncio
+async def test_full_snapshot_tombstones_omitted_document_passages() -> None:
+    headers, rows = _read_csv((FAMILY1 / "Policy_Corpus_Family1.csv").read_bytes())
+    raw_bytes = _serialize_csv(tuple(headers), rows[:1])
+    manifest = _manifest_for(rows[:1], "passages")
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    tables = [
+        ImportBatch.__table__,
+        ImportManifest.__table__,
+        ImportRecord.__table__,
+        QuarantineRow.__table__,
+        Document.__table__,
+        DocumentVersion.__table__,
+        Passage.__table__,
+    ]
+    Base.metadata.create_all(engine, tables=tables)
+    with Session(engine) as session:
+        db = _AsyncSessionAdapter(session)
+        omitted = Passage(
+            id="PAS-OMITTED-DOC",
+            document_id="DOC-REMOVED",
+            document_version_id="DOC-REMOVED:VER-001",
+            title="removed document passage",
+            content="old content",
+            source_ref="data/g1/removed.md",
+            page_number=1,
+            clause_ref="OLD",
+            language="vi",
+            scope="company:SN",
+            audience="reader",
+            status="effective",
+            has_essential_attachments=True,
+            is_tombstoned=False,
+        )
+        session.add(omitted)
+        session.commit()
+
+        await SERVICE.import_csv_bytes(
+            db,
+            raw_bytes,
+            source_type="passages",
+            batch_type=BatchType.FULL_SNAPSHOT,
+            expected_rows=1,
+            manifest_bytes=manifest,
+            idempotency_key="full-snapshot-omitted-doc",
+            submitted_by="steward-1",
+            batch_timestamp=datetime(2026, 11, 24, 11, 0, tzinfo=UTC),
+        )
+        tombstoned = session.get(Passage, "PAS-OMITTED-DOC")
+        assert tombstoned is not None
+        assert tombstoned.is_tombstoned is True
+        assert tombstoned.status == "withdrawn"
+
+
+@pytest.mark.asyncio
+async def test_critical_field_import_creates_parent_policy_and_policy_version() -> None:
+    raw_bytes = (FAMILY1 / "Critical_Fields_Family1.csv").read_bytes()
+    manifest_bytes = (FAMILY1 / "Source_URI_And_Checksum_Manifest_Family1.csv").read_bytes()
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    tables = [
+        ImportBatch.__table__,
+        ImportManifest.__table__,
+        ImportRecord.__table__,
+        QuarantineRow.__table__,
+        Document.__table__,
+        DocumentVersion.__table__,
+        Policy.__table__,
+        PolicyVersion.__table__,
+        CriticalField.__table__,
+    ]
+    Base.metadata.create_all(engine, tables=tables)
+    with Session(engine) as session:
+        db = _AsyncSessionAdapter(session)
+        await SERVICE.import_csv_bytes(
+            db,
+            raw_bytes,
+            source_type="critical_fields",
+            batch_type=BatchType.FULL_SNAPSHOT,
+            expected_rows=16,
+            manifest_bytes=manifest_bytes,
+            idempotency_key="cf-parent-fk-test",
+            submitted_by="steward-1",
+            batch_timestamp=datetime(2026, 11, 24, 12, 0, tzinfo=UTC),
+        )
+        policy = session.get(Policy, "POL-001")
+        policy_version = session.get(PolicyVersion, "PV-001")
+        cf = session.get(CriticalField, "CF-001")
+        assert policy is not None
+        assert policy.policy_family == PolicyFamily.COMMERCIAL_QUOTING_APPROVAL
+        assert policy_version is not None
+        assert policy_version.policy_id == "POL-001"
+        assert policy_version.document_version_id == "POL-001:VER-001"
+        assert cf is not None
+        assert cf.document_version_id == "POL-001:VER-001"
+
+
+@pytest.mark.asyncio
+async def test_enforce_corpus_ceiling_rejects_over_limit_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "CORPUS_MAX_PASSAGES", 2)
+    headers, rows = _read_csv((FAMILY1 / "Policy_Corpus_Family1.csv").read_bytes())
+    raw_bytes = _serialize_csv(tuple(headers), rows[:3])
+    manifest = _manifest_for(rows[:3], "passages")
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    tables = [
+        ImportBatch.__table__,
+        ImportManifest.__table__,
+        ImportRecord.__table__,
+        QuarantineRow.__table__,
+        Document.__table__,
+        DocumentVersion.__table__,
+        Passage.__table__,
+    ]
+    Base.metadata.create_all(engine, tables=tables)
+    with Session(engine) as session:
+        db = _AsyncSessionAdapter(session)
+        with pytest.raises(CorpusCeilingExceeded):
+            await SERVICE.import_csv_bytes(
+                db,
+                raw_bytes,
+                source_type="passages",
+                batch_type=BatchType.FULL_SNAPSHOT,
+                expected_rows=3,
+                manifest_bytes=manifest,
+                idempotency_key="ceiling-reject-test",
+                submitted_by="steward-1",
+                batch_timestamp=datetime(2026, 11, 24, 13, 0, tzinfo=UTC),
+                enforce_corpus_ceiling=True,
+            )
+        assert session.scalar(select(func.count()).select_from(Passage)) == 0
