@@ -1024,9 +1024,15 @@ class IngestionService:
 
     @staticmethod
     def _compose_document_version_id(prefix: str, document_version_id: str) -> str:
-        if ":" in document_version_id or not prefix:
-            return document_version_id
-        return f"{prefix}:{document_version_id}"
+        composed_id = (
+            document_version_id
+            if ":" in document_version_id or not prefix
+            else f"{prefix}:{document_version_id}"
+        )
+        if len(composed_id) <= 64:
+            return composed_id
+        digest = hashlib.sha256(composed_id.encode("utf-8")).hexdigest()[:32]
+        return f"{composed_id[:31]}-{digest}"
 
     @staticmethod
     def _infer_policy_family(

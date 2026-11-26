@@ -501,6 +501,20 @@ def test_higher_version_compares_numeric_tuples() -> None:
     assert SERVICE._higher_version("beta", "alpha") is True
 
 
+def test_composed_document_version_id_stays_within_database_limit() -> None:
+    long_prefix = f"DOC-{'a' * 80}"
+    long_version = f"VER-{'b' * 80}"
+
+    composed = SERVICE._compose_document_version_id(long_prefix, long_version)
+    other = SERVICE._compose_document_version_id(long_prefix, f"{long_version}x")
+    already_composed = SERVICE._compose_document_version_id("", f"DOC:{long_version}")
+
+    assert len(composed) <= 64
+    assert composed == SERVICE._compose_document_version_id(long_prefix, long_version)
+    assert composed != other
+    assert len(already_composed) <= 64
+
+
 @pytest.mark.asyncio
 async def test_composite_doc_version_id_prevents_cross_document_collision() -> None:
     headers, rows = _read_csv((FAMILY1 / "Policy_Corpus_Family1.csv").read_bytes())
