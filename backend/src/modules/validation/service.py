@@ -215,7 +215,7 @@ class ValidationService:
                 guidance_text=_EMERGENCY_DISABLE_GUIDANCE_VI,
             )
 
-        if package.status != AnswerStatus.ANSWERED:
+        if package.status not in {AnswerStatus.ANSWERED, AnswerStatus.ANSWERED_WITH_CONDITIONS}:
             return package.model_copy(
                 update={
                     "citations": [],

@@ -41,6 +41,8 @@ class AnswerStatus(StrEnum):
     """Explicit tri-state/hold outcomes for AnswerPackage (ANS 06, KNW 04, KNW 05)."""
 
     ANSWERED = "answered"
+    ANSWERED_WITH_CONDITIONS = "answered_with_conditions"
+    HOLD_AND_REFER = "hold_and_refer"
     HOLD = "hold"
     CLARIFICATION_REQUIRED = "clarification_required"
     REFERRED = "referred"
