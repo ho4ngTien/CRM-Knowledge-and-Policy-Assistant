@@ -61,7 +61,7 @@ class FeedbackReason(StrEnum):
 
 
 class ReferralStatus(StrEnum):
-    """Local referral workflow statuses (KNW 04)."""
+    """Local referral workflow statuses (KNW 05)."""
 
     REFERRED = "referred"
     OWNER_RESPONDED = "owner_responded"
