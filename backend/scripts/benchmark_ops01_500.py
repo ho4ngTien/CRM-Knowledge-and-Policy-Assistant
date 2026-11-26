@@ -212,6 +212,10 @@ async def _execute_benchmark_with_db(
     headers, baseline_rows = _read_csv(full_csv_bytes)
     now_vn = datetime.now(VN_TZ)
 
+    print(
+        f"[OPS01][{backend_engine}] Importing baseline ({len(baseline_rows)} rows)...",
+        flush=True,
+    )
     baseline_report = await service.import_csv_bytes(
         db,
         full_csv_bytes,
@@ -236,6 +240,7 @@ async def _execute_benchmark_with_db(
     change_manifest = _build_manifest(change_rows)
 
     # Stage 1: Benchmark 500-row ingestion
+    print(f"[OPS01][{backend_engine}] Stage 1: importing 500-row delta batch...", flush=True)
     t0 = time.perf_counter()
     report_500 = await service.import_csv_bytes(
         db,
@@ -249,6 +254,11 @@ async def _execute_benchmark_with_db(
         batch_timestamp=now_vn + timedelta(hours=8),
     )
     t1 = time.perf_counter()
+    print(
+        f"[OPS01][{backend_engine}] Stage 1 done in {t1 - t0:.2f}s "
+        f"(accepted={report_500.accepted_rows}, quarantined={report_500.quarantined_rows})",
+        flush=True,
+    )
 
     # Stage 2: Benchmark indexing pass over active passages
     active_result = await db.execute(
@@ -384,12 +394,18 @@ async def run_ops01_benchmark(database_url: str | None = None) -> Ops01Benchmark
     if database_url and database_url.startswith("postgresql"):
         async_engine = create_async_engine(database_url)
         try:
+            print(
+                "[OPS01][PostgreSQL] Preparing schema & truncating benchmark tables...",
+                flush=True,
+            )
             async with async_engine.begin() as conn:
                 await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-                await conn.run_sync(Base.metadata.drop_all, tables=tables)
                 await conn.run_sync(Base.metadata.create_all, tables=tables)
+                await conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+                table_names = ", ".join(table.name for table in tables)
+                await conn.execute(text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE"))
             session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-                async_engine, expire_on_commit=False
+                async_engine, expire_on_commit=False, autoflush=False
             )
             async with session_factory() as async_db:
                 return await _execute_benchmark_with_db(

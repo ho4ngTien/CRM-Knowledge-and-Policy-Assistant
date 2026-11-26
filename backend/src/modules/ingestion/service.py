@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import re
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -848,95 +849,175 @@ class IngestionService:
             issue.record_id for _, _, issue in validated.quarantined_rows if issue.record_id
         }
         applied = 0
+        # Batch-prefetch existing authoritative rows and parent IDs to avoid N+1 round-trips.
+        record_ids = {self._record_id(row, source_type) for _, row in validated.accepted_rows}
+        existing_by_id: dict[str, Passage | CriticalField] = {}
+        if record_ids:
+            if source_type == "passages":
+                prefetched_passages = (
+                    await db.execute(select(Passage).where(Passage.id.in_(record_ids)))
+                ).scalars().all()
+                existing_by_id = {obj.id: obj for obj in prefetched_passages}
+            else:
+                prefetched_fields = (
+                    await db.execute(select(CriticalField).where(CriticalField.id.in_(record_ids)))
+                ).scalars().all()
+                existing_by_id = {obj.id: obj for obj in prefetched_fields}
+
         seen_documents: set[str] = set()
         seen_doc_versions: set[str] = set()
         seen_policies: set[str] = set()
         seen_policy_versions: set[str] = set()
 
-        for _, row in validated.accepted_rows:
-            record_id = self._record_id(row, source_type)
-            action = (row.get("record_action") or "").strip().lower()
-            model = Passage if source_type == "passages" else CriticalField
-            current = await db.get(model, record_id)
-            current = cast(Passage | CriticalField | None, current)
-
-            incoming_version = (
-                self._compose_document_version_id(
-                    row.get("document_id") or "", row.get("document_version_id") or ""
-                )
-                if source_type == "passages"
-                else row.get("policy_version_id")
-            )
-            if current is not None:
-                current_timestamp = current.last_batch_timestamp
-                if current_timestamp is not None:
-                    current_utc = self._as_utc(current_timestamp)
-                    if batch_timestamp < current_utc:
-                        continue
-                    if batch_timestamp == current_utc:
-                        current_version = (
-                            current.document_version_id
-                            if source_type == "passages"
-                            else (
-                                current.policy_version_id
-                                if isinstance(current, CriticalField)
-                                else None
+        if validated.accepted_rows:
+            if source_type == "passages":
+                doc_ids = {row.get("document_id") or "" for _, row in validated.accepted_rows}
+                doc_ver_pks = {
+                    self._compose_document_version_id(
+                        row.get("document_id") or "", row.get("document_version_id") or ""
+                    )
+                    for _, row in validated.accepted_rows
+                }
+            else:
+                doc_ids = {
+                    (row.get("policy_id") or row.get("document_version_id") or "")
+                    for _, row in validated.accepted_rows
+                }
+                doc_ver_pks = {
+                    self._compose_document_version_id(
+                        (row.get("policy_id") or row.get("document_version_id") or ""),
+                        row.get("document_version_id") or "",
+                    )
+                    for _, row in validated.accepted_rows
+                }
+                policy_ids = {row.get("policy_id") or "" for _, row in validated.accepted_rows}
+                policy_ver_ids = {
+                    row.get("policy_version_id") or "" for _, row in validated.accepted_rows
+                }
+                if policy_ids:
+                    seen_policies = set(
+                        (await db.execute(select(Policy.id).where(Policy.id.in_(policy_ids))))
+                        .scalars()
+                        .all()
+                    )
+                if policy_ver_ids:
+                    seen_policy_versions = set(
+                        (
+                            await db.execute(
+                                select(PolicyVersion.id).where(
+                                    PolicyVersion.id.in_(policy_ver_ids)
+                                )
                             )
                         )
-                        if not self._higher_version(incoming_version, current_version):
-                            continue
+                        .scalars()
+                        .all()
+                    )
 
-            if action in {RecordAction.TOMBSTONE.value, RecordAction.DELETE.value}:
+            if doc_ids:
+                seen_documents = set(
+                    (await db.execute(select(Document.id).where(Document.id.in_(doc_ids))))
+                    .scalars()
+                    .all()
+                )
+            if doc_ver_pks:
+                seen_doc_versions = set(
+                    (
+                        await db.execute(
+                            select(DocumentVersion.id).where(DocumentVersion.id.in_(doc_ver_pks))
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+
+        no_autoflush_ctx = getattr(db, "no_autoflush", nullcontext())
+        with no_autoflush_ctx:
+            for _, row in validated.accepted_rows:
+                record_id = self._record_id(row, source_type)
+                action = (row.get("record_action") or "").strip().lower()
+                current = existing_by_id.get(record_id)
+
+                incoming_version = (
+                    self._compose_document_version_id(
+                        row.get("document_id") or "", row.get("document_version_id") or ""
+                    )
+                    if source_type == "passages"
+                    else row.get("policy_version_id")
+                )
                 if current is not None:
-                    current.is_tombstoned = True
-                    current.status = PolicyLifecycleStatus.WITHDRAWN.value
-                    current.tombstoned_at = batch_timestamp
-                    current.tombstone_batch_id = batch_id
-                    current.last_batch_id = batch_id
-                    current.last_batch_timestamp = batch_timestamp
-                    applied += 1
-                continue
+                    current_timestamp = current.last_batch_timestamp
+                    if current_timestamp is not None:
+                        current_utc = self._as_utc(current_timestamp)
+                        if batch_timestamp < current_utc:
+                            continue
+                        if batch_timestamp == current_utc:
+                            current_version = (
+                                current.document_version_id
+                                if source_type == "passages"
+                                else (
+                                    current.policy_version_id
+                                    if isinstance(current, CriticalField)
+                                    else None
+                                )
+                            )
+                            if not self._higher_version(incoming_version, current_version):
+                                continue
 
-            if source_type == "passages":
-                await self._upsert_passage(
-                    db,
-                    row,
-                    record_id,
-                    batch_id,
-                    batch_timestamp,
-                    seen_documents=seen_documents,
-                    seen_doc_versions=seen_doc_versions,
-                )
-            else:
-                await self._upsert_critical_field(
-                    db,
-                    row,
-                    record_id,
-                    batch_id,
-                    batch_timestamp,
-                    seen_documents=seen_documents,
-                    seen_doc_versions=seen_doc_versions,
-                    seen_policies=seen_policies,
-                    seen_policy_versions=seen_policy_versions,
-                )
-            applied += 1
+                if action in {RecordAction.TOMBSTONE.value, RecordAction.DELETE.value}:
+                    if current is not None:
+                        current.is_tombstoned = True
+                        current.status = PolicyLifecycleStatus.WITHDRAWN.value
+                        current.tombstoned_at = batch_timestamp
+                        current.tombstone_batch_id = batch_id
+                        current.last_batch_id = batch_id
+                        current.last_batch_timestamp = batch_timestamp
+                        applied += 1
+                    continue
+
+                if source_type == "passages":
+                    existing_by_id[record_id] = self._upsert_passage(
+                        db,
+                        row,
+                        record_id,
+                        batch_id,
+                        batch_timestamp,
+                        current=cast(Passage | None, current),
+                        seen_documents=seen_documents,
+                        seen_doc_versions=seen_doc_versions,
+                    )
+                else:
+                    existing_by_id[record_id] = self._upsert_critical_field(
+                        db,
+                        row,
+                        record_id,
+                        batch_id,
+                        batch_timestamp,
+                        current=cast(CriticalField | None, current),
+                        seen_documents=seen_documents,
+                        seen_doc_versions=seen_doc_versions,
+                        seen_policies=seen_policies,
+                        seen_policy_versions=seen_policy_versions,
+                    )
+                applied += 1
 
         if batch_type == BatchType.FULL_SNAPSHOT and validated.accepted_rows:
-            model = Passage if source_type == "passages" else CriticalField
             present_ids = {
                 self._record_id(row, source_type) for _, row in validated.accepted_rows
             } | quarantined_ids
-            existing_rows = (await db.execute(select(model))).scalars().all()
-            for current in existing_rows:
-                current = cast(Passage | CriticalField, current)
-                if current.id in present_ids or current.is_tombstoned:
+            existing_rows: list[Passage | CriticalField] = (
+                list((await db.execute(select(Passage))).scalars().all())
+                if source_type == "passages"
+                else list((await db.execute(select(CriticalField))).scalars().all())
+            )
+            for existing_row in existing_rows:
+                if existing_row.id in present_ids or existing_row.is_tombstoned:
                     continue
-                current.is_tombstoned = True
-                current.status = PolicyLifecycleStatus.WITHDRAWN.value
-                current.tombstoned_at = batch_timestamp
-                current.tombstone_batch_id = batch_id
-                current.last_batch_id = batch_id
-                current.last_batch_timestamp = batch_timestamp
+                existing_row.is_tombstoned = True
+                existing_row.status = PolicyLifecycleStatus.WITHDRAWN.value
+                existing_row.tombstoned_at = batch_timestamp
+                existing_row.tombstone_batch_id = batch_id
+                existing_row.last_batch_id = batch_id
+                existing_row.last_batch_timestamp = batch_timestamp
                 applied += 1
 
         return applied
@@ -1010,7 +1091,7 @@ class IngestionService:
             return incoming_nums > current_nums
         return incoming_ver > current_ver
 
-    async def _upsert_passage(
+    def _upsert_passage(
         self,
         db: AsyncSession,
         row: dict[str, str | None],
@@ -1018,10 +1099,10 @@ class IngestionService:
         batch_id: str,
         batch_timestamp: datetime,
         *,
+        current: Passage | None,
         seen_documents: set[str],
         seen_doc_versions: set[str],
-    ) -> None:
-        current = await db.get(Passage, record_id)
+    ) -> Passage:
         recorded_at = self._parse_datetime(row.get("recorded_at")) or batch_timestamp
         effective_from = self._parse_datetime(row.get("effective_from")) or batch_timestamp
         effective_to = self._parse_datetime(row.get("effective_to"))
@@ -1030,39 +1111,35 @@ class IngestionService:
         raw_doc_ver_id = row.get("document_version_id") or ""
         doc_ver_pk = self._compose_document_version_id(document_id, raw_doc_ver_id)
         if document_id not in seen_documents:
-            document = await db.get(Document, document_id)
-            if document is None:
-                db.add(
-                    Document(
-                        id=document_id,
-                        title=(row.get("title") or "")[:500],
-                        policy_family=self._infer_policy_family(
-                            identifier=document_id,
-                            title=row.get("title") or "",
-                            scope=row.get("scope") or "",
-                        ),
-                        authority_tier="policy",
-                        owner=row.get("owner") or "",
-                        source_ref=row.get("source_ref") or "",
-                    )
+            db.add(
+                Document(
+                    id=document_id,
+                    title=(row.get("title") or "")[:500],
+                    policy_family=self._infer_policy_family(
+                        identifier=document_id,
+                        title=row.get("title") or "",
+                        scope=row.get("scope") or "",
+                    ),
+                    authority_tier="policy",
+                    owner=row.get("owner") or "",
+                    source_ref=row.get("source_ref") or "",
                 )
+            )
             seen_documents.add(document_id)
         if doc_ver_pk not in seen_doc_versions:
-            version = await db.get(DocumentVersion, doc_ver_pk)
-            if version is None:
-                db.add(
-                    DocumentVersion(
-                        id=doc_ver_pk,
-                        document_id=document_id,
-                        approver=row.get("approver"),
-                        recorded_at=recorded_at,
-                        published_at=published_at,
-                        effective_from=effective_from,
-                        effective_to=effective_to,
-                        status=row.get("status") or "draft",
-                        supersedes_version_id=row.get("supersedes") or None,
-                    )
+            db.add(
+                DocumentVersion(
+                    id=doc_ver_pk,
+                    document_id=document_id,
+                    approver=row.get("approver"),
+                    recorded_at=recorded_at,
+                    published_at=published_at,
+                    effective_from=effective_from,
+                    effective_to=effective_to,
+                    status=row.get("status") or "draft",
+                    supersedes_version_id=row.get("supersedes") or None,
                 )
+            )
             seen_doc_versions.add(doc_ver_pk)
 
         payload = dict(
@@ -1087,12 +1164,14 @@ class IngestionService:
             source_recorded_at=recorded_at,
         )
         if current is None:
-            db.add(Passage(id=record_id, **payload))
-        else:
-            for key, value in payload.items():
-                setattr(current, key, value)
+            passage = Passage(id=record_id, **payload)
+            db.add(passage)
+            return passage
+        for key, value in payload.items():
+            setattr(current, key, value)
+        return current
 
-    async def _upsert_critical_field(
+    def _upsert_critical_field(
         self,
         db: AsyncSession,
         row: dict[str, str | None],
@@ -1100,12 +1179,12 @@ class IngestionService:
         batch_id: str,
         batch_timestamp: datetime,
         *,
+        current: CriticalField | None,
         seen_documents: set[str],
         seen_doc_versions: set[str],
         seen_policies: set[str],
         seen_policy_versions: set[str],
-    ) -> None:
-        current = await db.get(CriticalField, record_id)
+    ) -> CriticalField:
         policy_id = row.get("policy_id") or ""
         policy_version_id = row.get("policy_version_id") or ""
         raw_doc_ver_id = row.get("document_version_id") or ""
@@ -1126,64 +1205,60 @@ class IngestionService:
         )
 
         if doc_id not in seen_documents:
-            if await db.get(Document, doc_id) is None:
-                db.add(
-                    Document(
-                        id=doc_id,
-                        title=(row.get("field_name") or doc_id)[:500],
-                        policy_family=policy_family,
-                        authority_tier="policy",
-                        owner=owner,
-                        source_ref=row.get("source_clause") or "",
-                    )
+            db.add(
+                Document(
+                    id=doc_id,
+                    title=(row.get("field_name") or doc_id)[:500],
+                    policy_family=policy_family,
+                    authority_tier="policy",
+                    owner=owner,
+                    source_ref=row.get("source_clause") or "",
                 )
+            )
             seen_documents.add(doc_id)
 
         if doc_ver_pk not in seen_doc_versions:
-            if await db.get(DocumentVersion, doc_ver_pk) is None:
-                db.add(
-                    DocumentVersion(
-                        id=doc_ver_pk,
-                        document_id=doc_id,
-                        approver=approver,
-                        recorded_at=recorded_at,
-                        published_at=None,
-                        effective_from=effective_from,
-                        effective_to=effective_to,
-                        status=status,
-                        supersedes_version_id=None,
-                    )
+            db.add(
+                DocumentVersion(
+                    id=doc_ver_pk,
+                    document_id=doc_id,
+                    approver=approver,
+                    recorded_at=recorded_at,
+                    published_at=None,
+                    effective_from=effective_from,
+                    effective_to=effective_to,
+                    status=status,
+                    supersedes_version_id=None,
                 )
+            )
             seen_doc_versions.add(doc_ver_pk)
 
         if policy_id not in seen_policies:
-            if await db.get(Policy, policy_id) is None:
-                db.add(
-                    Policy(
-                        id=policy_id,
-                        title=(row.get("field_name") or policy_id)[:500],
-                        policy_family=policy_family,
-                    )
+            db.add(
+                Policy(
+                    id=policy_id,
+                    title=(row.get("field_name") or policy_id)[:500],
+                    policy_family=policy_family,
                 )
+            )
             seen_policies.add(policy_id)
 
         if policy_version_id not in seen_policy_versions:
-            if await db.get(PolicyVersion, policy_version_id) is None:
-                db.add(
-                    PolicyVersion(
-                        id=policy_version_id,
-                        policy_id=policy_id,
-                        document_version_id=doc_ver_pk,
-                        scope=scope,
-                        audience=audience,
-                        status=status,
-                        effective_from=effective_from,
-                        effective_to=effective_to,
-                        recorded_at=recorded_at,
-                        owner=owner,
-                        approver=approver,
-                    )
+            db.add(
+                PolicyVersion(
+                    id=policy_version_id,
+                    policy_id=policy_id,
+                    document_version_id=doc_ver_pk,
+                    scope=scope,
+                    audience=audience,
+                    status=status,
+                    effective_from=effective_from,
+                    effective_to=effective_to,
+                    recorded_at=recorded_at,
+                    owner=owner,
+                    approver=approver,
                 )
+            )
             seen_policy_versions.add(policy_version_id)
 
         payload = dict(
@@ -1212,10 +1287,12 @@ class IngestionService:
             source_recorded_at=effective_from,
         )
         if current is None:
-            db.add(CriticalField(id=record_id, **payload))
-        else:
-            for key, value in payload.items():
-                setattr(current, key, value)
+            field = CriticalField(id=record_id, **payload)
+            db.add(field)
+            return field
+        for key, value in payload.items():
+            setattr(current, key, value)
+        return current
 
     @staticmethod
     def _parse_datetime(value: str | None) -> datetime | None:
