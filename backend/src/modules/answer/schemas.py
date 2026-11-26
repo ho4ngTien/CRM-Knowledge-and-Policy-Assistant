@@ -1,10 +1,11 @@
-"""Pydantic schemas for the mandatory 7-part AnswerPackage (ANS 01, ANS 03, SRS-FR-06.1) [CKPA-17]."""  # noqa: E501
+"""Pydantic schemas for the mandatory 7-part AnswerPackage (ANS 01, ANS 03, SRS-FR-06.1) [CKPA-17, CKPA-91]."""  # noqa: E501
 
 from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.modules.policy.schemas import CriticalFieldItem
+from src.modules.selection.o1_context import CustomerContextO1
 from src.shared.enums import AnswerStatus
 
 
@@ -21,6 +22,8 @@ class AnswerCitation(BaseModel):
     clause_ref: str
     quoted_text: str
     evidence_url: str
+    effective_date: date | None = None
+    owner: str | None = None
 
 
 class AnswerQueryRequest(BaseModel):
@@ -31,15 +34,21 @@ class AnswerQueryRequest(BaseModel):
     question: str = Field(..., min_length=2, max_length=2000)
     task_id: str | None = Field(default=None, max_length=64)
     governing_date: date | None = None
-    scope: str = Field(default="company:SN;branch:all;role:all;customer_group:all;product:all")
+    scope: str = Field(
+        default=(
+            "company:SN;branch:all;role:all;"
+            "customer_category:all;product:all;transaction_scope:all"
+        )
+    )
     allow_future_preview: bool = False
+    o1_context: CustomerContextO1 | None = None
 
 
 class AnswerPackage(BaseModel):
     """Complete 7-part verified response returned only AFTER post-generation validation.
 
     Strictly frozen under Gate G1, SRS Mục 4.3, 7.2, SRS-FR-06.1
-    | RFP: ANS03, ANS04, DEL02 [CKPA-17].
+    | RFP: ANS03, ANS04, DEL02 [CKPA-17, CKPA-91].
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -51,22 +60,25 @@ class AnswerPackage(BaseModel):
     # Part 1: Original question
     original_question: str
 
-    # Part 2: Governing date (Asia/Ho_Chi_Minh) & matched scope flags
+    # Part 2: Governing date (Asia/Ho_Chi_Minh) & matched 6-dim scope flags
     governing_date: date
     timezone: str = "Asia/Ho_Chi_Minh"
     scope: str
+    scope_matched_dimensions: dict[str, str] = Field(default_factory=dict)
     is_historical: bool = False
     is_future_preview: bool = False
 
-    # Part 3: Concise Vietnamese explanation & separated verbatim quotes
+    # Part 3: Concise Vietnamese explanation (normally 100-250w) & separated verbatim quotes
     guidance_text: str
+    guidance_word_count: int = Field(default=0, ge=0)
     verbatim_quotes: list[str] = Field(default_factory=list)
 
-    # Part 4: Grounded source citations
+    # Part 4: Grounded source citations (<= 8 entries)
     citations: list[AnswerCitation] = Field(default_factory=list)
 
-    # Part 5: Deterministic structured critical fields
+    # Part 5: Deterministic structured critical fields (<= 8 entries / <= 6000 Unicode chars)
     critical_fields: list[CriticalFieldItem] = Field(default_factory=list)
+    critical_field_cap_warning: str | None = None
 
     # Part 6: Missing facts, Hold reason & uncertainty/clarification guidance
     missing_facts: list[str] = Field(default_factory=list)
@@ -76,6 +88,10 @@ class AnswerPackage(BaseModel):
     # Part 7: Local referral target & mandatory internal-use disclaimer
     referral_target: str | None = None
     internal_use_warning: str
+
+    # Option O1 (only populated when ENABLE_O1_CONTEXT_IMPORT is True)
+    o1_enabled: bool = False
+    o1_record: CustomerContextO1 | None = None
 
     # Runtime governance metadata
     pii_warning: str | None = None

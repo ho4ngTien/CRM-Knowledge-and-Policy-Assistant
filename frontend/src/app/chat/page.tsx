@@ -1,313 +1,416 @@
 "use client";
 
+/**
+ * CKPA-91 · G2-AC01 · feat/CKPA-91-answer-pkg-o1-flag-fields
+ * Chat (Workspace Nhân viên) — Tích hợp AnswerPackageRenderer + Non-streaming + STALE check
+ *
+ * Assignee: [S3] Phạm Lương Yến Nhi
+ */
+
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
-import { askPolicyQuestion, createLocalReferral, submitFeedback } from "../../lib/api";
-import type { AnswerPackage, FeedbackReason } from "../../types/answer";
+import AnswerPackageRenderer from "../../components/AnswerPackageRenderer";
+import {
+  ApiError,
+  askFollowUpQuestion,
+  askPolicyQuestion,
+  createLocalReferral,
+  getPassageById,
+  regenerateAnswerPackage,
+  submitKNW01Flag,
+} from "../../lib/api";
+import type { AnswerPackage, FeedbackReason, PolicyFamily } from "../../types/answer";
 
-const FEEDBACK_OPTIONS: { value: FeedbackReason; label: string }[] = [
-  { value: "missing_source", label: "Thiếu nguồn tài liệu (missing_source)" },
-  { value: "outdated_rule", label: "Quy định đã lỗi thời (outdated_rule)" },
-  { value: "wrong_scope", label: "Sai phạm vi áp dụng (wrong_scope)" },
-  { value: "missing_exception", label: "Thiếu ngoại lệ (missing_exception)" },
-  { value: "rejected", label: "Từ chối dùng hướng dẫn (rejected)" },
-];
+/** Lightweight authoritative status check (0 LLM tokens / 0 AnswerPackage quota). */
+const STALE_POLL_INTERVAL_MS = 60_000;
 
-export default function ChatSplitScreenPage() {
+const DEFAULT_SCOPE =
+  "company:SN;branch:all;role:sales;customer_category:all;product:all;transaction_scope:all";
+
+export default function ChatWorkspacePage() {
   const [question, setQuestion] = useState("");
+  const [taskId, setTaskId] = useState<string | undefined>(undefined);
   const [governingDate, setGoverningDate] = useState("");
-  const [scope, setScope] = useState(
-    "company:SN;branch:all;role:sales;customer_group:all;product:all"
-  );
-  const [answer, setAnswer] = useState<AnswerPackage | null>(null);
-  const [feedbackReason, setFeedbackReason] = useState<FeedbackReason>("missing_source");
-  const [feedbackComment, setFeedbackComment] = useState("");
-  const [statusNote, setStatusNote] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [scope, setScope] = useState(DEFAULT_SCOPE);
+  const [allowFuture, setAllowFuture] = useState(false);
 
-  async function handleAsk(event: FormEvent) {
-    event.preventDefault();
+  const [answer, setAnswer] = useState<AnswerPackage | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [statusNote, setStatusNote] = useState<string | null>(null);
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const answerRef = useRef<AnswerPackage | null>(null);
+  answerRef.current = answer;
+
+  const checkCitedPassagesStillValid = useCallback(async () => {
+    const current = answerRef.current;
+    if (!current || current.status === "stale" || current.citations.length === 0) {
+      return;
+    }
+    try {
+      const checks = await Promise.all(
+        current.citations.map((c) => getPassageById(c.passage_id, current.is_historical))
+      );
+      const anyInvalid = checks.some(
+        (p) => p.is_tombstoned || p.status === "withdrawn" || p.status === "quarantined"
+      );
+      if (anyInvalid) {
+        setAnswer((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: "stale",
+                citations: [],
+                verbatim_quotes: [],
+                critical_fields: [],
+                hold_reason: "Source withdrawn or tombstoned while workspace was open (KNW 04).",
+              }
+            : null
+        );
+        setStatusNote(
+          "Cảnh báo STALE: Chính sách trích dẫn vừa bị thu hồi. Tuyệt đối không dùng hướng dẫn cũ."
+        );
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setAnswer((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: "stale",
+                citations: [],
+                verbatim_quotes: [],
+                critical_fields: [],
+                hold_reason: "HTTP 409 POLICY_WITHDRAWN detected on re-verification.",
+              }
+            : null
+        );
+        setStatusNote("Cảnh báo STALE: Nguồn chính sách vừa bị thu hồi (HTTP 409).");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (answer && answer.status !== "stale" && answer.citations.length > 0) {
+      pollRef.current = setInterval(() => {
+        void checkCitedPassagesStillValid();
+      }, STALE_POLL_INTERVAL_MS);
+    }
+    const onFocus = () => {
+      void checkCitedPassagesStillValid();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [answer, checkCitedPassagesStillValid]);
+
+  async function runQuery(mode: "ask" | "follow_up" | "regenerate") {
     if (!question.trim()) return;
     setLoading(true);
     setStatusNote(null);
+    const payload = {
+      question,
+      task_id: mode === "ask" ? undefined : taskId,
+      governing_date: governingDate || undefined,
+      scope,
+      allow_future_preview: allowFuture,
+    };
     try {
-      const pkg = await askPolicyQuestion({
-        question,
-        governing_date: governingDate || undefined,
-        scope,
-      });
+      const pkg =
+        mode === "follow_up"
+          ? await askFollowUpQuestion(payload)
+          : mode === "regenerate"
+          ? await regenerateAnswerPackage(payload)
+          : await askPolicyQuestion(payload);
       setAnswer(pkg);
+      setTaskId(pkg.task_id);
     } catch (err) {
-      setStatusNote(err instanceof Error ? err.message : "Không thể kết nối máy chủ kiểm chứng.");
+      setStatusNote(
+        err instanceof Error ? err.message : "Không thể kết nối máy chủ kiểm chứng."
+      );
     } finally {
       setLoading(false);
     }
   }
 
+  function handleAsk(event: FormEvent) {
+    event.preventDefault();
+    void runQuery("ask");
+  }
+
   async function handleReferral() {
     if (!answer) return;
+    const policyFamily = detectPolicyFamily(answer);
     try {
       const ticket = await createLocalReferral({
         task_id: answer.task_id,
         answer_package_id: answer.answer_id,
         target_owner: answer.referral_target ?? "policy_owner",
-        policy_family: "commercial_quoting_approval",
-        question_summary: answer.original_question,
+        policy_family: policyFamily,
+        question_summary: answer.original_question.slice(0, 200),
       });
-      setStatusNote(`Đã tạo phiếu chuyển xử lý nội bộ ${ticket.id}.`);
+      setStatusNote(`Đã tạo phiếu chuyển xử lý nội bộ: ${ticket.id}`);
     } catch (err) {
       setStatusNote(err instanceof Error ? err.message : "Lỗi tạo phiếu chuyển xử lý.");
     }
   }
 
-  async function handleFeedback() {
-    if (!answer || !feedbackComment.trim()) return;
-    try {
-      await submitFeedback({
-        task_id: answer.task_id,
-        answer_package_id: answer.answer_id,
-        reason: feedbackReason,
-        comment: feedbackComment,
-      });
-      setStatusNote("Đã gửi phản hồi vào hàng đợi Steward (không tự sửa quy định).");
-      setFeedbackComment("");
-    } catch (err) {
-      setStatusNote(err instanceof Error ? err.message : "Lỗi gửi phản hồi.");
-    }
+  async function handleKNW01Flag(reason: FeedbackReason, comment: string) {
+    if (!answer) return;
+    await submitKNW01Flag({
+      task_id: answer.task_id,
+      answer_package_id: answer.answer_id,
+      reason,
+      comment,
+    });
+    setStatusNote("Đã gửi phản hồi KNW 01 vào hàng đợi Steward.");
+  }
+
+  function handleNewQuestion() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    setAnswer(null);
+    setTaskId(undefined);
+    setQuestion("");
+    setStatusNote(null);
   }
 
   return (
     <main
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 1fr",
+        gridTemplateColumns: "380px 1fr",
         gap: "1.5rem",
         padding: "1.5rem",
-        fontFamily: "sans-serif",
+        fontFamily: "system-ui, sans-serif",
+        maxWidth: 1400,
+        margin: "0 auto",
       }}
     >
-      {/* Left Pane: Query, Governing Date, Guidance & Triage */}
-      <section style={{ borderRight: "1px solid #e2e8f0", paddingRight: "1.25rem" }}>
-        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h1>Hỏi đáp Chính sách CRM</h1>
-          <Link href="/">Trang chủ</Link>
+      <aside>
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "1rem",
+          }}
+        >
+          <h1 style={{ fontSize: "1.1rem", margin: 0 }}>Hỏi đáp Chính sách CRM</h1>
+          <Link href="/" style={{ fontSize: "0.82rem" }}>
+            Trang chủ
+          </Link>
         </header>
 
-        <p style={{ fontSize: "0.85rem", color: "#b45309" }}>
-          SEC 02: Không nhập SĐT, email, CCCD/MST hoặc dữ liệu cá nhân khách hàng vào câu hỏi.
+        <p
+          style={{
+            fontSize: "0.78rem",
+            color: "#b45309",
+            backgroundColor: "#fffbeb",
+            padding: "0.4rem 0.6rem",
+            borderRadius: 4,
+            border: "1px solid #fde68a",
+            margin: "0 0 0.75rem",
+          }}
+        >
+          <strong>SEC 02:</strong> Không nhập SĐT, email, CCCD/MST, STK ngân hàng hoặc dữ liệu
+          cá nhân khách hàng vào câu hỏi.
         </p>
 
-        <form onSubmit={handleAsk} style={{ display: "grid", gap: "0.75rem" }}>
-          <textarea
-            rows={4}
-            placeholder="Nhập câu hỏi chính sách (ví dụ: Báo giá chiết khấu 12% cần ai duyệt?)"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            style={{ width: "100%", padding: "0.5rem" }}
-          />
-          <label>
-            Ngày chi phối (giờ Asia/Ho_Chi_Minh, để trống = hôm nay):{" "}
+        <form onSubmit={handleAsk} style={{ display: "grid", gap: "0.65rem" }}>
+          <label style={LABEL_STYLE}>
+            Câu hỏi chính sách
+            <textarea
+              rows={5}
+              placeholder="Ví dụ: Báo giá chiết khấu 12% cho khách B2B cần ai duyệt?"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              style={{ ...INPUT_STYLE, resize: "vertical" }}
+              required
+              maxLength={2000}
+            />
+            <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>{question.length}/2000</span>
+          </label>
+
+          <label style={LABEL_STYLE}>
+            Ngày chi phối (Asia/Ho_Chi_Minh — để trống = hôm nay)
             <input
               type="date"
               value={governingDate}
               onChange={(e) => setGoverningDate(e.target.value)}
+              style={INPUT_STYLE}
             />
           </label>
-          <label>
-            Phạm vi áp dụng:{" "}
+
+          <label style={LABEL_STYLE}>
+            Phạm vi áp dụng (6 chiều DAT 04)
             <input
               type="text"
               value={scope}
               onChange={(e) => setScope(e.target.value)}
-              style={{ width: "100%", padding: "0.4rem" }}
+              style={INPUT_STYLE}
+              placeholder={DEFAULT_SCOPE}
             />
+            <span style={{ fontSize: "0.72rem", color: "#64748b" }}>
+              company · branch · role · customer_category · product · transaction_scope
+            </span>
           </label>
-          <button type="submit" disabled={loading}>
-            {loading ? "Đang truy xuất & kiểm chứng..." : "Tra cứu chính sách (Không Stream)"}
-          </button>
+
+          <label style={{ fontSize: "0.82rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            <input
+              type="checkbox"
+              checked={allowFuture}
+              onChange={(e) => setAllowFuture(e.target.checked)}
+            />
+            Cho phép xem trước chính sách tương lai (chưa hiệu lực)
+          </label>
+
+          {taskId && (
+            <div style={{ fontSize: "0.78rem", color: "#64748b" }}>
+              Task hiện tại: <code>{taskId}</code>
+            </div>
+          )}
+
+          <div style={{ display: "grid", gap: "0.4rem" }}>
+            <button type="submit" disabled={loading} style={BTN_STYLE("#1d4ed8", "#fff")}>
+              {loading
+                ? "Đang kiểm tra quyền, trích dẫn & trường trọng yếu (Không Stream)..."
+                : "Tra cứu chính sách"}
+            </button>
+
+            {answer && taskId && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void runQuery("follow_up")}
+                  disabled={loading}
+                  style={BTN_STYLE("#0369a1", "#fff")}
+                >
+                  Hỏi tiếp theo (Follow-up · giữ Task ID)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runQuery("regenerate")}
+                  disabled={loading}
+                  style={BTN_STYLE("#0f766e", "#fff")}
+                >
+                  Tạo lại gói trả lời (Regenerate)
+                </button>
+              </>
+            )}
+
+            {answer && (
+              <button
+                type="button"
+                onClick={handleNewQuestion}
+                style={BTN_STYLE("#e2e8f0", "#334155")}
+              >
+                Câu hỏi mới
+              </button>
+            )}
+          </div>
         </form>
 
         {statusNote && (
-          <p role="status" style={{ marginTop: "0.75rem", color: "#0f766e" }}>
+          <p
+            role="status"
+            style={{
+              marginTop: "0.75rem",
+              padding: "0.5rem 0.75rem",
+              backgroundColor: statusNote.includes("STALE") || statusNote.includes("Lỗi") ? "#fef2f2" : "#f0fdf4",
+              color: statusNote.includes("STALE") || statusNote.includes("Lỗi") ? "#991b1b" : "#166534",
+              borderRadius: 6,
+              fontSize: "0.85rem",
+            }}
+          >
             {statusNote}
           </p>
         )}
 
-        {answer && (
-          <article style={{ marginTop: "1.25rem", display: "grid", gap: "0.75rem" }}>
-            <div>
-              <strong>Trạng thái gói trả lời:</strong> <code>{answer.status}</code> | Task:{" "}
-              <code>{answer.task_id}</code>
-            </div>
+        <p
+          style={{
+            marginTop: "1rem",
+            fontSize: "0.72rem",
+            color: "#94a3b8",
+            borderTop: "1px solid #e2e8f0",
+            paddingTop: "0.75rem",
+          }}
+        >
+          <strong>KNW 02:</strong> Hướng dẫn nội bộ — nhân viên phải kiểm tra hoàn cảnh, nguồn
+          hiện hành và thẩm quyền trước khi hành động. Không thay thế phê duyệt hay thực thi.
+        </p>
+      </aside>
 
-            {answer.pii_warning && (
-              <div style={{ padding: "0.5rem", backgroundColor: "#fef2f2", color: "#991b1b" }}>
-                {answer.pii_warning}
-              </div>
-            )}
-
-            <div>
-              <h2>
-                {answer.status === "answered"
-                  ? "Diễn giải hướng dẫn (Verified)"
-                  : "Thông báo tạm giữ / từ chối"}
-              </h2>
-              <p>{answer.guidance_text}</p>
-            </div>
-
-            {answer.hold_reason && (
-              <div style={{ padding: "0.75rem", backgroundColor: "#fff7ed", border: "1px solid #fdba74" }}>
-                <strong>Lý do HOLD / Làm rõ:</strong> {answer.hold_reason}
-                {answer.missing_facts.length > 0 && (
-                  <ul>
-                    {answer.missing_facts.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: "0.75rem" }}>
-              <button type="button" onClick={handleReferral}>
-                Chuyển Policy Owner ({answer.referral_target ?? "policy_owner"})
-              </button>
-            </div>
-
-            <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "0.75rem" }}>
-              <h3>Phản hồi quy trình (5 lý do KNW 07)</h3>
-              <select
-                value={feedbackReason}
-                onChange={(e) => setFeedbackReason(e.target.value as FeedbackReason)}
-              >
-                {FEEDBACK_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="text"
-                placeholder="Ghi chú chi tiết thiếu sót..."
-                value={feedbackComment}
-                onChange={(e) => setFeedbackComment(e.target.value)}
-                style={{ width: "100%", margin: "0.5rem 0", padding: "0.4rem" }}
-              />
-              <button type="button" onClick={handleFeedback}>
-                Gửi Feedback Candidate
-              </button>
-            </div>
-          </article>
-        )}
-      </section>
-
-      {/* Right Pane: Verbatim Evidence, Deterministic Critical Fields & Stale Guards */}
       <section>
-        <h2>Bằng chứng &amp; Trường Trọng yếu</h2>
+        <h2 style={{ fontSize: "1rem", margin: "0 0 0.75rem", color: "#334155" }}>
+          Answer Package 7 phần &amp; Trường Trọng yếu (G2-AC01)
+        </h2>
+
         {!answer ? (
-          <p style={{ color: "#64748b" }}>
-            Nguyên văn điều khoản trích dẫn, bảng Critical Fields xác định từ DB và ngày hiệu lực
-            sẽ hiển thị tại đây sau khi kiểm chứng hoàn tất.
-          </p>
-        ) : (
-          <div style={{ display: "grid", gap: "1rem" }}>
-            {answer.status === "stale" && (
-              <div
-                role="alert"
-                style={{ padding: "0.75rem", backgroundColor: "#fee2e2", color: "#991b1b" }}
-              >
-                CẢNH BÁO STALE: Chính sách liên quan vừa bị thu hồi. Tuyệt đối không dùng hướng
-                dẫn này; hãy chạy lại truy vấn.
-              </div>
-            )}
-
-            <div style={{ fontSize: "0.9rem", backgroundColor: "#f8fafc", padding: "0.75rem" }}>
-              <strong>Ngày chi phối:</strong> {answer.governing_date} ({answer.timezone}){" "}
-              {answer.is_historical && <span>[Hướng dẫn lịch sử]</span>}
-              {answer.is_future_preview && <span>[Chính sách tương lai chưa hiệu lực]</span>}
-              <br />
-              <strong>Snapshot Age:</strong>{" "}
-              {answer.snapshot_age_hours != null ? `${answer.snapshot_age_hours} giờ` : "Chưa có dữ liệu"}
-            </div>
-
-            <div>
-              <h3>Nguyên văn trích dẫn (Verbatim Quotes)</h3>
-              {answer.verbatim_quotes.length === 0 ? (
-                <p>Không có nguyên văn hợp lệ.</p>
-              ) : (
-                <ul>
-                  {answer.verbatim_quotes.map((quote) => (
-                    <li key={quote}>
-                      <blockquote>{quote}</blockquote>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div>
-              <h3>Nguồn trích dẫn (Citations)</h3>
-              {answer.citations.length === 0 ? (
-                <p>Chưa có trích dẫn được xác minh.</p>
-              ) : (
-                <ul>
-                  {answer.citations.map((cit) => (
-                    <li key={`${cit.passage_id}-${cit.document_version_id}`}>
-                      <strong>{cit.title}</strong> ({cit.document_version_id}, trang{" "}
-                      {cit.page_number}, {cit.clause_ref}) &mdash;{" "}
-                      <Link href={`/evidence?passage_id=${encodeURIComponent(cit.passage_id)}`}>
-                        Mở nguồn
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div>
-              <h3>Trường trọng yếu từ DB (Critical Fields)</h3>
-              {answer.critical_fields.length === 0 ? (
-                <p>Không có trường trọng yếu áp dụng.</p>
-              ) : (
-                <table border={1} cellPadding={6} style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr>
-                      <th>Trường</th>
-                      <th>Toán tử / Giá trị</th>
-                      <th>Thẩm quyền duyệt</th>
-                      <th>Điều khoản nguồn</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {answer.critical_fields.map((cf) => (
-                      <tr key={cf.field_id}>
-                        <td>{cf.field_name}</td>
-                        <td>
-                          {cf.operator} {cf.value} {cf.unit ?? ""} {cf.currency ?? ""}
-                        </td>
-                        <td>{cf.approval_role}</td>
-                        <td>{cf.source_clause}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            <footer
-              style={{
-                padding: "0.75rem",
-                backgroundColor: "#fffbeb",
-                border: "1px solid #fbbf24",
-                fontSize: "0.85rem",
-              }}
-            >
-              {answer.internal_use_warning}
-            </footer>
+          <div
+            style={{
+              padding: "2rem",
+              border: "1px dashed #cbd5e1",
+              borderRadius: 8,
+              color: "#94a3b8",
+              textAlign: "center",
+            }}
+          >
+            Nhập câu hỏi và nhấn Tra cứu để hiển thị Answer Package đầy đủ 7 phần.
           </div>
+        ) : (
+          <AnswerPackageRenderer
+            pkg={answer}
+            onKNW01Flag={handleKNW01Flag}
+            onReferral={handleReferral}
+          />
         )}
       </section>
     </main>
   );
+}
+
+function detectPolicyFamily(pkg: AnswerPackage): PolicyFamily {
+  const q = pkg.original_question.toLowerCase();
+  if (q.includes("báo giá") || q.includes("chiết khấu") || q.includes("duyệt")) {
+    return "commercial_quoting_approval";
+  }
+  if (q.includes("bảo hành") || q.includes("sửa chữa") || q.includes("warranty")) {
+    return "service_warranty_routing";
+  }
+  return "customer_info_handling";
+}
+
+const LABEL_STYLE: React.CSSProperties = {
+  display: "grid",
+  gap: "0.25rem",
+  fontSize: "0.82rem",
+  fontWeight: 600,
+  color: "#374151",
+};
+
+const INPUT_STYLE: React.CSSProperties = {
+  width: "100%",
+  padding: "0.4rem 0.5rem",
+  border: "1px solid #cbd5e1",
+  borderRadius: 4,
+  fontSize: "0.85rem",
+  boxSizing: "border-box",
+};
+
+function BTN_STYLE(bg: string, color: string): React.CSSProperties {
+  return {
+    padding: "0.5rem 1rem",
+    backgroundColor: bg,
+    color,
+    border: "none",
+    borderRadius: 6,
+    cursor: "pointer",
+    fontWeight: 600,
+    fontSize: "0.85rem",
+    width: "100%",
+  };
 }

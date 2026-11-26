@@ -15,6 +15,12 @@ from src.modules.knowledge.schemas import PassageSummary
 from src.modules.policy.schemas import ApplicabilityCandidate, CriticalFieldItem
 from src.modules.policy.service import PolicyService
 from src.modules.retrieval.service import RetrievalService
+from src.modules.selection.o1_context import (
+    CustomerContextO1,
+    apply_o1_to_scope_dimensions,
+    validate_o1_customer_record,
+)
+from src.modules.selection.schemas import ScopeDimensions
 from src.modules.validation.service import ValidationService
 from src.shared.auth import AuthenticatedUser
 from src.shared.contracts import (
@@ -27,6 +33,7 @@ from src.shared.contracts import (
     ValidationGatePort,
 )
 from src.shared.enums import AnswerStatus
+from src.shared.exceptions import AccessDenied
 from src.shared.pii_guard import scan_query_for_pii
 
 INTERNAL_USE_WARNING_VI = (
@@ -47,9 +54,83 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
+_SCOPE_DIMENSION_KEYS: tuple[str, ...] = (
+    "company",
+    "branch",
+    "role",
+    "customer_category",
+    "product",
+    "transaction_scope",
+)
+
+
 def _escape_xml_value(text: str) -> str:
     """Neutralize XML/tag delimiter characters in untrusted inputs (ANS 08)."""
     return html.escape(text, quote=True)
+
+
+def parse_scope_dimensions_6dim(scope_str: str) -> dict[str, str]:
+    """Deterministically parse a scope string into the 6 DAT 04 dimensions."""
+    parsed: dict[str, str] = {key: "unspecified" for key in _SCOPE_DIMENSION_KEYS}
+    for token in scope_str.split(";"):
+        part = token.strip()
+        if not part:
+            continue
+        sep = ":" if ":" in part else ("=" if "=" in part else None)
+        if sep is None:
+            continue
+        raw_key, raw_val = part.split(sep, maxsplit=1)
+        key = raw_key.strip().lower()
+        if key == "customer_group":
+            key = "customer_category"
+        if key in parsed:
+            val = raw_val.strip()
+            if val:
+                parsed[key] = val
+    return parsed
+
+
+def count_vietnamese_words(text: str) -> int:
+    """Count whitespace-delimited words for 100-250w Vietnamese guidance telemetry."""
+    return len(text.split())
+
+
+def bound_deterministic_critical_fields(
+    fields: list[CriticalFieldItem],
+) -> tuple[list[CriticalFieldItem], str | None]:
+    """Bound critical fields to <= 8 rows and check <= 6000 Unicode chars without silent loss."""
+    warnings: list[str] = []
+    max_items = settings.ANSWER_MAX_PASSAGES
+    max_chars = settings.PASSAGE_MAX_CHARS
+    if len(fields) > max_items:
+        warnings.append(
+            f"Vượt trần hiển thị ({len(fields)}/{max_items} trường trọng yếu); "
+            f"chỉ giữ {max_items} mục đầu tiên."
+        )
+    bounded = list(fields[:max_items])
+    for cf in bounded:
+        entry_text = " ".join(
+            [
+                cf.field_name,
+                cf.value,
+                cf.approval_role,
+                cf.time_limit or "",
+                cf.exception_condition or "",
+                cf.source_clause,
+                *cf.required_documents,
+            ]
+        )
+        if len(entry_text) > max_chars:
+            warnings.append(
+                f"Trường {cf.field_id} ({cf.field_name}) dài {len(entry_text)}/{max_chars} "
+                "ký tự Unicode (OPS 08: không cắt ngắn âm thầm)."
+            )
+    return bounded, (" ".join(warnings) if warnings else None)
+
+
+def _format_scope_from_dimensions(dims: ScopeDimensions) -> str:
+    data = dims.model_dump()
+    return ";".join(f"{k}:{data.get(k) or 'all'}" for k in _SCOPE_DIMENSION_KEYS)
 
 
 class AnswerOrchestratorService:
@@ -133,6 +214,30 @@ class AnswerOrchestratorService:
             "</prompt_envelope>"
         )
 
+    def _resolve_o1_context(
+        self, request: AnswerQueryRequest
+    ) -> tuple[bool, CustomerContextO1 | None, str]:
+        """Enforce Option O1 Base Scope lock and enrich 6-dim scope when O1 is enabled."""
+        if request.o1_context is not None and not settings.ENABLE_O1_CONTEXT_IMPORT:
+            raise AccessDenied("O1_OPTION_DISABLED_IN_BASE_SCOPE")
+
+        if not settings.ENABLE_O1_CONTEXT_IMPORT:
+            return False, None, request.scope
+
+        if request.o1_context is None:
+            return True, None, request.scope
+
+        validated_o1 = validate_o1_customer_record(request.o1_context.model_dump())
+        parsed = parse_scope_dimensions_6dim(request.scope)
+        base_dims = ScopeDimensions(
+            **{
+                k: (None if parsed[k] == "unspecified" else parsed[k])
+                for k in _SCOPE_DIMENSION_KEYS
+            }
+        )
+        enriched_dims = apply_o1_to_scope_dimensions(base_dims, validated_o1)
+        return True, validated_o1, _format_scope_from_dimensions(enriched_dims)
+
     def build_guarded_response(
         self,
         user: AuthenticatedUser,
@@ -143,6 +248,7 @@ class AnswerOrchestratorService:
         """Execute Base Scope guards, PII scan, VN date resolution, and boundary checks."""
         _ = user
         self._assert_non_streaming()
+        o1_enabled, o1_record, effective_scope = self._resolve_o1_context(request)
 
         task_id = request.task_id or f"TASK-{uuid.uuid4().hex[:8].upper()}"
         answer_id = f"ANS-{uuid.uuid4().hex[:10].upper()}"
@@ -160,6 +266,9 @@ class AnswerOrchestratorService:
                 task_id=task_id,
                 status=AnswerStatus.REFUSED_OUT_OF_SCOPE,
                 request=request,
+                effective_scope=effective_scope,
+                o1_enabled=o1_enabled,
+                o1_record=o1_record,
                 governing_date=gov_date,
                 is_historical=is_hist,
                 is_future_preview=is_future_preview,
@@ -178,6 +287,9 @@ class AnswerOrchestratorService:
             task_id=task_id,
             status=AnswerStatus.HOLD,
             request=request,
+            effective_scope=effective_scope,
+            o1_enabled=o1_enabled,
+            o1_record=o1_record,
             governing_date=gov_date,
             is_historical=is_hist,
             is_future_preview=is_future_preview,
@@ -204,6 +316,7 @@ class AnswerOrchestratorService:
     ) -> AnswerPackage:
         """Execute 5-layer Modular Monolith + Deterministic Policy Gate + Constrained RAG flow."""
         self._assert_non_streaming()
+        o1_enabled, o1_record, effective_scope = self._resolve_o1_context(request)
 
         task_id = request.task_id or f"TASK-{uuid.uuid4().hex[:8].upper()}"
         answer_id = f"ANS-{uuid.uuid4().hex[:10].upper()}"
@@ -224,6 +337,9 @@ class AnswerOrchestratorService:
                 task_id=task_id,
                 status=AnswerStatus.HOLD,
                 request=request,
+                effective_scope=effective_scope,
+                o1_enabled=o1_enabled,
+                o1_record=o1_record,
                 governing_date=gov_date,
                 is_historical=is_hist,
                 is_future_preview=is_future_preview,
@@ -244,6 +360,9 @@ class AnswerOrchestratorService:
                 task_id=task_id,
                 status=AnswerStatus.REFUSED_OUT_OF_SCOPE,
                 request=request,
+                effective_scope=effective_scope,
+                o1_enabled=o1_enabled,
+                o1_record=o1_record,
                 governing_date=gov_date,
                 is_historical=is_hist,
                 is_future_preview=is_future_preview,
@@ -264,6 +383,9 @@ class AnswerOrchestratorService:
                 task_id=task_id,
                 status=AnswerStatus.HOLD,
                 request=request,
+                effective_scope=effective_scope,
+                o1_enabled=o1_enabled,
+                o1_record=o1_record,
                 governing_date=gov_date,
                 is_historical=is_hist,
                 is_future_preview=is_future_preview,
@@ -293,6 +415,9 @@ class AnswerOrchestratorService:
                 task_id=task_id,
                 status=AnswerStatus.HOLD,
                 request=request,
+                effective_scope=effective_scope,
+                o1_enabled=o1_enabled,
+                o1_record=o1_record,
                 governing_date=gate.governing_date,
                 is_historical=gate.is_historical,
                 is_future_preview=gate.is_future_preview,
@@ -312,7 +437,7 @@ class AnswerOrchestratorService:
         spec = HybridQuerySpec(
             query=request.question,
             governing_date=gate.governing_date,
-            scope_filter=request.scope,
+            scope_filter=effective_scope,
             applicable_version_ids=gate.applicable_version_ids,
             allow_historical=gate.is_historical,
             allow_future_preview=gate.is_future_preview,
@@ -326,6 +451,9 @@ class AnswerOrchestratorService:
                 task_id=task_id,
                 status=AnswerStatus.HOLD,
                 request=request,
+                effective_scope=effective_scope,
+                o1_enabled=o1_enabled,
+                o1_record=o1_record,
                 governing_date=gate.governing_date,
                 is_historical=gate.is_historical,
                 is_future_preview=gate.is_future_preview,
@@ -351,6 +479,9 @@ class AnswerOrchestratorService:
                 task_id=task_id,
                 status=AnswerStatus.HOLD,
                 request=request,
+                effective_scope=effective_scope,
+                o1_enabled=o1_enabled,
+                o1_record=o1_record,
                 governing_date=gate.governing_date,
                 is_historical=gate.is_historical,
                 is_future_preview=gate.is_future_preview,
@@ -389,6 +520,9 @@ class AnswerOrchestratorService:
                 task_id=task_id,
                 status=AnswerStatus.HOLD,
                 request=request,
+                effective_scope=effective_scope,
+                o1_enabled=o1_enabled,
+                o1_record=o1_record,
                 governing_date=gate.governing_date,
                 is_historical=gate.is_historical,
                 is_future_preview=gate.is_future_preview,
@@ -408,11 +542,28 @@ class AnswerOrchestratorService:
                 is_error=True,
             )
 
+        has_conditions = (
+            gate.is_historical
+            or gate.is_future_preview
+            or bool(gen_res.uncertainty_note)
+            or bool(gen_res.missing_facts)
+            or any(cf.exception_condition for cf in gate.critical_fields)
+        )
+        if gen_res.hold_reason:
+            resolved_status = AnswerStatus.HOLD
+        elif has_conditions:
+            resolved_status = AnswerStatus.ANSWERED_WITH_CONDITIONS
+        else:
+            resolved_status = AnswerStatus.ANSWERED
+
         candidate_pkg = self._build_answer_package(
             answer_id=answer_id,
             task_id=task_id,
-            status=AnswerStatus.HOLD if gen_res.hold_reason else AnswerStatus.ANSWERED,
+            status=resolved_status,
             request=request,
+            effective_scope=effective_scope,
+            o1_enabled=o1_enabled,
+            o1_record=o1_record,
             governing_date=gate.governing_date,
             is_historical=gate.is_historical,
             is_future_preview=gate.is_future_preview,
@@ -465,6 +616,9 @@ class AnswerOrchestratorService:
         task_id: str,
         status: AnswerStatus,
         request: AnswerQueryRequest,
+        effective_scope: str | None = None,
+        o1_enabled: bool = False,
+        o1_record: CustomerContextO1 | None = None,
         governing_date: date,
         is_historical: bool,
         is_future_preview: bool,
@@ -480,6 +634,9 @@ class AnswerOrchestratorService:
         snapshot_age_hours: float | None = None,
         llm_calls_used: int = 0,
     ) -> AnswerPackage:
+        final_scope = effective_scope or request.scope
+        bounded_citations = (citations or [])[: settings.ANSWER_MAX_PASSAGES]
+        bounded_cfs, cf_cap_warning = bound_deterministic_critical_fields(critical_fields or [])
         return AnswerPackage(
             answer_id=answer_id,
             task_id=task_id,
@@ -487,18 +644,23 @@ class AnswerOrchestratorService:
             original_question=request.question,
             governing_date=governing_date,
             timezone=settings.APP_TIMEZONE,
-            scope=request.scope,
+            scope=final_scope,
+            scope_matched_dimensions=parse_scope_dimensions_6dim(final_scope),
             is_historical=is_historical,
             is_future_preview=is_future_preview,
             guidance_text=guidance_text,
+            guidance_word_count=count_vietnamese_words(guidance_text),
             verbatim_quotes=verbatim_quotes or [],
-            citations=citations or [],
-            critical_fields=critical_fields or [],
+            citations=bounded_citations,
+            critical_fields=bounded_cfs,
+            critical_field_cap_warning=cf_cap_warning,
             missing_facts=missing_facts or [],
             hold_reason=hold_reason,
             uncertainty_note=uncertainty_note,
             referral_target=referral_target,
             internal_use_warning=INTERNAL_USE_WARNING_VI,
+            o1_enabled=o1_enabled,
+            o1_record=o1_record,
             pii_warning=pii_warning,
             snapshot_age_hours=snapshot_age_hours,
             llm_calls_used=llm_calls_used,
@@ -521,7 +683,8 @@ class AnswerOrchestratorService:
             llm_calls=package.llm_calls_used,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            is_hold=package.status in {AnswerStatus.HOLD, AnswerStatus.STALE},
+            is_hold=package.status
+            in {AnswerStatus.HOLD, AnswerStatus.HOLD_AND_REFER, AnswerStatus.STALE},
             is_error=is_error,
         )
         await self._audit_meter.record_audit_event(
