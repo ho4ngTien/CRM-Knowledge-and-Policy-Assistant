@@ -64,3 +64,5 @@ SongNhat_RFP_Mapping
 .agents
 _restricted_out_of_repo/
 *.tsbuildinfo
+
+docs/work-packages/
