@@ -949,3 +949,340 @@ class TestDeterministicNumericThreshold:
             for t in result.hold_decision.triggers
         )
         assert "phụ lục II" in (result.hold_decision.combined_reason_vi or "")
+
+
+# ===========================================================================
+# G. G1 Blocker Remediation Tests (STAFF_NOTE, DAT08, IN/REQUIRED, RBAC, PII)
+# ===========================================================================
+
+
+class TestG1BlockerRemediations:
+    """Tests for STAFF_NOTE exclusion, DAT08 unit/currency, IN/REQUIRED, RBAC, Validation, PII."""
+
+    def test_staff_note_excluded_from_applicable_versions_triggers_dat04_hold(
+        self, svc: SelectionService, default_dimensions: ScopeDimensions
+    ):
+        from src.modules.policy.service import PolicyService
+
+        note = _make_candidate(
+            version_id="V-NOTE-01",
+            authority_tier=AuthorityTier.STAFF_NOTE,
+            status=PolicyLifecycleStatus.EFFECTIVE,
+        )
+        policy_svc = PolicyService()
+        app_res = policy_svc.evaluate_candidates([note], requested_date=TODAY_VN)
+        assert app_res.applicable_version_ids == []
+
+        gate = _make_gate_ok(["V-NOTE-01"])
+        sel_res = svc.run_selection(
+            candidates=[note],
+            dimensions=default_dimensions,
+            all_critical_fields=[],
+            gate_decision=gate,
+            requested_date=TODAY_VN,
+        )
+        assert sel_res.applicable_version_ids == []
+        assert sel_res.hold_decision.must_hold is True
+        assert any(
+            t.code == "DAT04_NO_APPLICABLE_VERSION" for t in sel_res.hold_decision.triggers
+        )
+
+    def test_dat08_missing_unit_or_currency_triggers_hold(
+        self, svc: SelectionService, default_dimensions: ScopeDimensions
+    ):
+        vid = "V-DAT08-UNIT"
+        c = _make_candidate(version_id=vid)
+        gate = _make_gate_ok([vid])
+
+        cf_no_unit = CriticalFieldItem(
+            field_id="CF-NO-UNIT",
+            policy_id="POL-01",
+            policy_version_id=vid,
+            document_version_id="DOC-V1",
+            field_name="Hạn mức chiết khấu",
+            field_type=CriticalFieldType.NUMBER,
+            operator=ComparisonOperator.LE,
+            value="5",
+            unit="",
+            currency=None,
+            approval_role="sales",
+            source_clause="Điều 2.1",
+            status=PolicyLifecycleStatus.EFFECTIVE,
+        )
+        res_unit = svc.run_selection(
+            candidates=[c],
+            dimensions=default_dimensions,
+            all_critical_fields=[cf_no_unit],
+            gate_decision=gate,
+            requested_date=TODAY_VN,
+        )
+        assert res_unit.hold_decision.must_hold is True
+        assert any(
+            t.code == "DAT08_MISSING_TABLE_OR_ANNOTATION"
+            for t in res_unit.hold_decision.triggers
+        )
+
+        cf_no_currency = CriticalFieldItem(
+            field_id="CF-NO-CURR",
+            policy_id="POL-01",
+            policy_version_id=vid,
+            document_version_id="DOC-V1",
+            field_name="Giá trị đơn hàng",
+            field_type=CriticalFieldType.CURRENCY,
+            operator=ComparisonOperator.GE,
+            value="500000000",
+            unit="VND",
+            currency="",
+            approval_role="director",
+            source_clause="Điều 2.3",
+            status=PolicyLifecycleStatus.EFFECTIVE,
+        )
+        res_curr = svc.run_selection(
+            candidates=[c],
+            dimensions=default_dimensions,
+            all_critical_fields=[cf_no_currency],
+            gate_decision=gate,
+            requested_date=TODAY_VN,
+        )
+        assert res_curr.hold_decision.must_hold is True
+        assert any(
+            t.code == "DAT08_MISSING_TABLE_OR_ANNOTATION"
+            for t in res_curr.hold_decision.triggers
+        )
+
+    def test_evaluate_numeric_threshold_in_and_required_operators(self, svc: SelectionService):
+        from decimal import Decimal
+
+        from src.modules.policy.service import PolicyService
+
+        policy_svc = PolicyService()
+
+        assert svc.evaluate_numeric_threshold(ComparisonOperator.IN, Decimal("20"), "10;20;30")
+        assert not svc.evaluate_numeric_threshold(ComparisonOperator.IN, Decimal("25"), "10,20,30")
+        assert svc.evaluate_numeric_threshold(ComparisonOperator.REQUIRED, "MST-123", "required")
+        assert not svc.evaluate_numeric_threshold(ComparisonOperator.REQUIRED, "   ", "required")
+
+        assert policy_svc.evaluate_numeric_threshold(
+            ComparisonOperator.IN, Decimal("20"), "10;20;30"
+        )
+        assert not policy_svc.evaluate_numeric_threshold(
+            ComparisonOperator.IN, Decimal("99"), "10,20,30"
+        )
+        assert policy_svc.evaluate_numeric_threshold(
+            ComparisonOperator.REQUIRED, Decimal("1"), "required"
+        )
+
+    def test_validation_service_blocks_tombstoned_draft_and_partial_digit_matches(self):
+        from src.modules.knowledge.schemas import PassageSummary
+        from src.modules.validation.schemas import CitationCheckInput
+        from src.modules.validation.service import ValidationService
+        from src.shared.auth import AuthenticatedUser
+        from src.shared.enums import UserRole
+        from src.shared.exceptions import CitationValidationFailed, PolicyWithdrawn
+
+        val_svc = ValidationService()
+        reader = AuthenticatedUser(
+            user_id="u-r", email="r@songnhat.vn", roles=frozenset({UserRole.READER})
+        )
+        tomb_passage = PassageSummary(
+            passage_id="P-TOMB",
+            document_id="D1",
+            document_version_id="V1",
+            title="Tombstoned",
+            content="Quy định cũ",
+            source_ref="Ref",
+            page_number=1,
+            clause_ref="Điều 1",
+            scope="all",
+            audience=["reader"],
+            status=PolicyLifecycleStatus.EFFECTIVE,
+            has_essential_attachments=True,
+            effective_from=datetime(2026, 1, 1, tzinfo=VN_TZ),
+            is_tombstoned=True,
+        )
+        with pytest.raises(PolicyWithdrawn):
+            val_svc.verify_citations_and_state(
+                reader,
+                [
+                    CitationCheckInput(
+                        passage_id="P-TOMB",
+                        document_id="D1",
+                        document_version_id="V1",
+                        quoted_text="Quy định cũ",
+                    )
+                ],
+                {"P-TOMB": tomb_passage},
+            )
+
+        draft_passage = tomb_passage.model_copy(
+            update={
+                "passage_id": "P-DRAFT",
+                "is_tombstoned": False,
+                "status": PolicyLifecycleStatus.DRAFT,
+            }
+        )
+        with pytest.raises(CitationValidationFailed):
+            val_svc.verify_citations_and_state(
+                reader,
+                [
+                    CitationCheckInput(
+                        passage_id="P-DRAFT",
+                        document_id="D1",
+                        document_version_id="V1",
+                        quoted_text="Quy định cũ",
+                    )
+                ],
+                {"P-DRAFT": draft_passage},
+            )
+
+        # Token-boundary numeric check: "5" must NOT match "15" or "50"
+        cf_5 = _make_cf(policy_version_id="V1", value="5")
+        errors_mismatch = val_svc.verify_critical_fields_integrity(
+            "Chiết khấu tối đa là 15% cho đơn hàng 50 triệu.", [cf_5]
+        )
+        assert len(errors_mismatch) == 1
+        errors_match = val_svc.verify_critical_fields_integrity(
+            "Chiết khấu tối đa là 5% cho đơn hàng.", [cf_5]
+        )
+        assert errors_match == ()
+
+    @pytest.mark.asyncio
+    async def test_direct_url_rbac_blocks_reader_on_draft_passage_and_lineage(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.modules.knowledge.service import KnowledgeService
+        from src.shared.auth import AuthenticatedUser
+        from src.shared.enums import UserRole
+        from src.shared.exceptions import AccessDenied
+
+        ks = KnowledgeService()
+        reader = AuthenticatedUser(
+            user_id="u-r",
+            email="r@songnhat.vn",
+            roles=frozenset({UserRole.READER}),
+            allowed_audiences=frozenset({"reader"}),
+        )
+        draft_passage = SimpleNamespace(
+            id="P-DRAFT-1",
+            document_id="DOC-1",
+            document_version_id="VER-1",
+            title="Draft",
+            content="Draft content",
+            source_ref="Ref",
+            page_number=1,
+            clause_ref="Điều 1",
+            language="vi",
+            scope="all",
+            audience="reader",
+            status=PolicyLifecycleStatus.DRAFT.value,
+            has_essential_attachments=True,
+            is_tombstoned=False,
+        )
+        version = SimpleNamespace(
+            id="VER-1",
+            effective_from=datetime(2026, 1, 1, tzinfo=VN_TZ),
+            effective_to=None,
+            supersedes_version_id=None,
+        )
+        mock_db = AsyncMock()
+        mock_result = SimpleNamespace(first=lambda: (draft_passage, version))
+        mock_db.execute.return_value = mock_result
+
+        with pytest.raises(AccessDenied):
+            await ks.get_passage(mock_db, reader, "P-DRAFT-1")
+
+        # Lineage: reader with no permitted passage gets AccessDenied
+        doc = SimpleNamespace(
+            id="DOC-SECRET",
+            title="Secret",
+            policy_family="commercial_quoting_approval",
+            authority_tier="policy",
+            owner="P2",
+        )
+        secret_passage = SimpleNamespace(audience="policy_owner", is_tombstoned=False)
+        mock_db_lin = AsyncMock()
+        mock_db_lin.get.return_value = doc
+        mock_db_lin.execute.return_value = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [secret_passage])
+        )
+        with pytest.raises(AccessDenied):
+            await ks.get_document_lineage(mock_db_lin, reader, "DOC-SECRET")
+
+    @pytest.mark.asyncio
+    async def test_pii_redacted_before_llm_in_execute_pipeline(self):
+        from src.modules.answer.schemas import AnswerQueryRequest
+        from src.modules.answer.service import AnswerOrchestratorService
+        from src.modules.knowledge.schemas import PassageSummary
+        from src.shared.auth import AuthenticatedUser
+        from src.shared.contracts import LLMGenerationRequest, LLMGenerationResult
+        from src.shared.enums import UserRole
+
+        captured: list[LLMGenerationRequest] = []
+
+        class _CaptureLLM:
+            async def generate(self, request: LLMGenerationRequest) -> LLMGenerationResult:
+                captured.append(request)
+                return LLMGenerationResult(
+                    guidance_text="HOLD",
+                    verbatim_quotes=(),
+                    citations=(),
+                    hold_reason="test capture",
+                    llm_calls_used=1,
+                )
+
+        class _StaticRetrieval:
+            async def search_hybrid(self, user, spec):
+                return [
+                    PassageSummary(
+                        passage_id="P1",
+                        document_id="D1",
+                        document_version_id="V1",
+                        title="T",
+                        content="Nội dung chính sách",
+                        source_ref="Ref",
+                        page_number=1,
+                        clause_ref="Điều 1",
+                        scope="all",
+                        audience=["reader"],
+                        status=PolicyLifecycleStatus.EFFECTIVE,
+                        has_essential_attachments=True,
+                        effective_from=datetime(2026, 1, 1, tzinfo=VN_TZ),
+                    )
+                ]
+
+            async def fetch_authoritative_passages(self, user, passage_ids, db=None):
+                return {}
+
+        class _AllowAudit:
+            async def check_monthly_quota(self, db=None):
+                from types import SimpleNamespace
+
+                return SimpleNamespace(allowed=True, reason=None)
+
+            async def record_usage_meter(self, db, **kwargs):
+                return None
+
+            async def record_audit_event(self, db, **kwargs):
+                return None
+
+        orch = AnswerOrchestratorService(
+            retrieval_port=_StaticRetrieval(),
+            llm_generator=_CaptureLLM(),
+            audit_meter=_AllowAudit(),
+        )
+        reader = AuthenticatedUser(
+            user_id="u-r", email="r@songnhat.vn", roles=frozenset({UserRole.READER})
+        )
+        req = AnswerQueryRequest(
+            question="Khách hàng SĐT 0912345678 email khach@gmail.com hỏi chiết khấu?"
+        )
+        cand = _make_candidate(version_id="V1")
+        await orch.execute_pipeline(reader, req, candidates=[cand])
+
+        assert len(captured) == 1
+        assert "0912345678" not in captured[0].question
+        assert "khach@gmail.com" not in captured[0].question
+        assert "0912345678" not in captured[0].user_prompt_envelope
+        assert "[REDACTED_PHONE]" in captured[0].question
+        assert "[REDACTED_EMAIL]" in captured[0].question

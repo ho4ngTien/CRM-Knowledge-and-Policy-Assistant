@@ -41,6 +41,7 @@ class AdminService:
         policy_version_id: str,
         target_status: PolicyLifecycleStatus,
         reason: str,
+        cache_purger: CachePurgePort | None = None,
     ) -> LifecycleTransitionResponse:
         """Advance a policy version strictly along allowed KNW 03 transitions."""
         version = await db.get(PolicyVersion, policy_version_id)
@@ -74,6 +75,22 @@ class AdminService:
                 )
 
         version.status = target_status.value
+        if target_status in {
+            PolicyLifecycleStatus.EFFECTIVE,
+            PolicyLifecycleStatus.SUPERSEDED,
+            PolicyLifecycleStatus.WITHDRAWN,
+        }:
+            await self._sync_authoritative_status(
+                db,
+                policy_version_id=policy_version_id,
+                document_version_id=version.document_version_id,
+                target_status=target_status,
+                actor_id=user.user_id,
+                reason=reason,
+            )
+        if target_status == PolicyLifecycleStatus.WITHDRAWN:
+            await self._mark_answers_stale(db, version.document_version_id)
+
         db.add(
             PolicyLifecycleEvent(
                 policy_version_id=policy_version_id,
@@ -85,6 +102,10 @@ class AdminService:
             )
         )
         await db.commit()
+        if target_status == PolicyLifecycleStatus.WITHDRAWN:
+            await self._trigger_cache_purge(
+                policy_version_id, version.document_version_id, cache_purger
+            )
         return LifecycleTransitionResponse(
             policy_version_id=policy_version_id,
             previous_status=current_status,
@@ -107,46 +128,15 @@ class AdminService:
 
         prev_status = version.status
         version.status = PolicyLifecycleStatus.WITHDRAWN.value
-        withdrawn_at = datetime.now(UTC)
-
-        await db.execute(
-            update(DocumentVersion)
-            .where(DocumentVersion.id == version.document_version_id)
-            .values(status=PolicyLifecycleStatus.WITHDRAWN.value)
+        await self._sync_authoritative_status(
+            db,
+            policy_version_id=policy_version_id,
+            document_version_id=version.document_version_id,
+            target_status=PolicyLifecycleStatus.WITHDRAWN,
+            actor_id=user.user_id,
+            reason=reason,
         )
-        await db.execute(
-            update(Passage)
-            .where(Passage.document_version_id == version.document_version_id)
-            .values(
-                status=PolicyLifecycleStatus.WITHDRAWN.value,
-                withdrawn_at=withdrawn_at,
-                withdrawn_by=user.user_id,
-                withdrawal_reason=reason,
-            )
-        )
-        await db.execute(
-            update(CriticalField)
-            .where(CriticalField.policy_version_id == policy_version_id)
-            .values(
-                status=PolicyLifecycleStatus.WITHDRAWN.value,
-                withdrawn_at=withdrawn_at,
-                withdrawn_by=user.user_id,
-                withdrawal_reason=reason,
-            )
-        )
-
-        stmt = (
-            update(AnswerPackageRecord)
-            .where(
-                AnswerPackageRecord.id.in_(
-                    AnswerCitationRecord.__table__.select()
-                    .with_only_columns(AnswerCitationRecord.answer_package_id)
-                    .where(AnswerCitationRecord.document_version_id == version.document_version_id)
-                )
-            )
-            .values(is_stale=True)
-        )
-        stale_result = await db.execute(stmt)
+        stale_rowcount = await self._mark_answers_stale(db, version.document_version_id)
 
         db.add(
             PolicyLifecycleEvent(
@@ -159,34 +149,96 @@ class AdminService:
             )
         )
         await db.commit()
+        await self._trigger_cache_purge(
+            policy_version_id, version.document_version_id, cache_purger
+        )
 
-        if cache_purger is not None:
-            await cache_purger.purge_policy_caches(policy_version_id, version.document_version_id)
-        else:
-            try:
-                purge_app = Celery(
-                    "ckpa-withdrawal-purge",
-                    broker=settings.CELERY_BROKER_URL,
-                    backend=settings.CELERY_RESULT_BACKEND,
-                )
-                purge_app.send_task(
-                    "src.tasks.index_task.withdraw_and_purge_cache",
-                    args=(policy_version_id, version.document_version_id),
-                )
-            except KombuError as exc:
-                logging.getLogger(__name__).warning(
-                    "withdrawal_cache_purge_enqueue_failed",
-                    exc_info=exc,
-                    extra={"policy_version_id": policy_version_id},
-                )
-
-        stale_rowcount = cast(CursorResult[Any], stale_result).rowcount
         return InstantWithdrawalResponse(
             policy_version_id=policy_version_id,
             status=PolicyLifecycleStatus.WITHDRAWN,
-            stale_answers_marked=int(stale_rowcount or 0),
+            stale_answers_marked=stale_rowcount,
             cache_purge_deadline_seconds=settings.CACHE_WITHDRAWAL_MAX_SECONDS,
         )
+
+    async def _sync_authoritative_status(
+        self,
+        db: AsyncSession,
+        *,
+        policy_version_id: str,
+        document_version_id: str,
+        target_status: PolicyLifecycleStatus,
+        actor_id: str,
+        reason: str,
+    ) -> None:
+        """Synchronize DocumentVersion, Passage, and CriticalField rows on lifecycle transitions."""
+        await db.execute(
+            update(DocumentVersion)
+            .where(DocumentVersion.id == document_version_id)
+            .values(status=target_status.value)
+        )
+        passage_values: dict[str, object] = {"status": target_status.value}
+        field_values: dict[str, object] = {"status": target_status.value}
+        if target_status == PolicyLifecycleStatus.WITHDRAWN:
+            withdrawn_at = datetime.now(UTC)
+            withdrawal_meta = {
+                "withdrawn_at": withdrawn_at,
+                "withdrawn_by": actor_id,
+                "withdrawal_reason": reason,
+            }
+            passage_values.update(withdrawal_meta)
+            field_values.update(withdrawal_meta)
+        await db.execute(
+            update(Passage)
+            .where(Passage.document_version_id == document_version_id)
+            .values(**passage_values)
+        )
+        await db.execute(
+            update(CriticalField)
+            .where(CriticalField.policy_version_id == policy_version_id)
+            .values(**field_values)
+        )
+
+    @staticmethod
+    async def _mark_answers_stale(db: AsyncSession, document_version_id: str) -> int:
+        stmt = (
+            update(AnswerPackageRecord)
+            .where(
+                AnswerPackageRecord.id.in_(
+                    AnswerCitationRecord.__table__.select()
+                    .with_only_columns(AnswerCitationRecord.answer_package_id)
+                    .where(AnswerCitationRecord.document_version_id == document_version_id)
+                )
+            )
+            .values(is_stale=True)
+        )
+        stale_result = await db.execute(stmt)
+        return int(cast(CursorResult[Any], stale_result).rowcount or 0)
+
+    @staticmethod
+    async def _trigger_cache_purge(
+        policy_version_id: str,
+        document_version_id: str,
+        cache_purger: CachePurgePort | None,
+    ) -> None:
+        if cache_purger is not None:
+            await cache_purger.purge_policy_caches(policy_version_id, document_version_id)
+            return
+        try:
+            purge_app = Celery(
+                "ckpa-withdrawal-purge",
+                broker=settings.CELERY_BROKER_URL,
+                backend=settings.CELERY_RESULT_BACKEND,
+            )
+            purge_app.send_task(
+                "src.tasks.index_task.withdraw_and_purge_cache",
+                args=(policy_version_id, document_version_id),
+            )
+        except KombuError as exc:
+            logging.getLogger(__name__).warning(
+                "withdrawal_cache_purge_enqueue_failed",
+                exc_info=exc,
+                extra={"policy_version_id": policy_version_id},
+            )
 
     async def set_emergency_disable(
         self,

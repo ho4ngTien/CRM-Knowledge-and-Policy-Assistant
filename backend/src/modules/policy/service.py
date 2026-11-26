@@ -1,7 +1,7 @@
 """Policy applicability, authority matrix, and deterministic threshold logic (DAT 03-06)."""
 
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -15,6 +15,7 @@ from src.modules.policy.schemas import (
     AuthorityEntryResponse,
     CriticalFieldItem,
 )
+from src.shared.auth import AuthenticatedUser, check_policy_audience
 from src.shared.contracts import PolicyGateDecision
 from src.shared.enums import (
     AuthorityTier,
@@ -22,6 +23,15 @@ from src.shared.enums import (
     CriticalFieldType,
     PolicyFamily,
     PolicyLifecycleStatus,
+    UserRole,
+)
+
+_PRIVILEGED_POLICY_ROLES: frozenset[UserRole] = frozenset(
+    {
+        UserRole.POLICY_OWNER,
+        UserRole.STEWARD,
+        UserRole.ADMINISTRATOR,
+    }
 )
 
 
@@ -80,7 +90,7 @@ class PolicyService:
             timezone=settings.APP_TIMEZONE,
             is_historical=is_historical,
             is_future_preview=future_preview,
-            applicable_version_ids=[c.version_id for c in eligible],
+            applicable_version_ids=[c.version_id for c in non_note],
             has_conflict=has_conflict,
             hold_reason=hold_reason,
         )
@@ -96,6 +106,25 @@ class PolicyService:
         is_snapshot_stale: bool = False,
     ) -> PolicyGateDecision:
         """Evaluate Layer 2 deterministic applicability, conflict hold, and critical fields."""
+        if requested_date is None:
+            today_vn = datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date()
+            return PolicyGateDecision(
+                governing_date=today_vn,
+                timezone=settings.APP_TIMEZONE,
+                is_historical=False,
+                is_future_preview=False,
+                applicable_version_ids=(),
+                has_conflict=False,
+                can_proceed=False,
+                hold_reason=(
+                    "OPS 03 / DAT 04 Hold: Thiếu ngày chi phối (requested_date=None); "
+                    "không thể xác định phiên bản chính sách áp dụng."
+                ),
+                critical_fields=(),
+                snapshot_age_hours=snapshot_age_hours,
+                is_snapshot_stale=is_snapshot_stale,
+            )
+
         applicability = self.evaluate_candidates(
             candidates,
             requested_date=requested_date,
@@ -171,6 +200,24 @@ class PolicyService:
         self, operator: ComparisonOperator, actual: Decimal, target: str
     ) -> bool:
         """Compute threshold checks deterministically in Python instead of in the LLM."""
+        if operator == ComparisonOperator.REQUIRED:
+            if isinstance(actual, bool):
+                return False
+            if isinstance(actual, Decimal):
+                return actual.is_finite()
+            return bool(str(actual).strip())
+        if operator == ComparisonOperator.IN:
+            sep = ";" if ";" in target else ","
+            items = [part.strip() for part in target.split(sep) if part.strip()]
+            if not items:
+                return False
+            parsed_targets: set[Decimal] = set()
+            for item in items:
+                try:
+                    parsed_targets.add(Decimal(item))
+                except InvalidOperation:
+                    return False
+            return actual in parsed_targets
         if operator == ComparisonOperator.BETWEEN:
             low_s, high_s = [part.strip() for part in target.split(";", maxsplit=1)]
             return Decimal(low_s) <= actual <= Decimal(high_s)
@@ -201,17 +248,38 @@ class PolicyService:
         ]
 
     async def list_critical_fields(
-        self, db: AsyncSession, policy_version_id: str
+        self,
+        db: AsyncSession,
+        user: AuthenticatedUser,
+        policy_version_id: str,
+        *,
+        allow_historical: bool = False,
     ) -> list[CriticalFieldItem]:
-        """Fetch deterministic structured critical fields for a policy version."""
+        """Fetch deterministic structured critical fields guarded by audience & lifecycle RBAC."""
         rows = (
             await db.execute(
                 select(CriticalField).where(
                     CriticalField.policy_version_id == policy_version_id,
                     CriticalField.status != PolicyLifecycleStatus.WITHDRAWN.value,
+                    CriticalField.is_tombstoned.is_(False),
                 )
             )
         ).scalars().all()
+
+        is_reader_only = not bool(user.roles & _PRIVILEGED_POLICY_ROLES)
+        allowed_reader_statuses = {PolicyLifecycleStatus.EFFECTIVE.value}
+        if allow_historical:
+            allowed_reader_statuses.add(PolicyLifecycleStatus.SUPERSEDED.value)
+
+        visible_rows: list[CriticalField] = []
+        for r in rows:
+            audiences = [a.strip() for a in r.audience.split(",") if a.strip()]
+            if not check_policy_audience(user, audiences):
+                continue
+            if is_reader_only and r.status not in allowed_reader_statuses:
+                continue
+            visible_rows.append(r)
+
         return [
             CriticalFieldItem(
                 field_id=r.id,
@@ -235,5 +303,5 @@ class PolicyService:
                 source_clause=r.source_clause,
                 status=PolicyLifecycleStatus(r.status),
             )
-            for r in rows
+            for r in visible_rows
         ]

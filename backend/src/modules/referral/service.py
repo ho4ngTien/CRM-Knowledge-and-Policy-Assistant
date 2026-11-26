@@ -12,8 +12,17 @@ from src.modules.referral.schemas import (
     ReferralUpdateRequest,
 )
 from src.shared.auth import AuthenticatedUser
-from src.shared.enums import PolicyFamily, ReferralStatus
+from src.shared.enums import PolicyFamily, ReferralStatus, UserRole
 from src.shared.exceptions import PolicyNotFound
+
+_REFERRAL_PRIVILEGED_ROLES: frozenset[UserRole] = frozenset(
+    {
+        UserRole.POLICY_OWNER,
+        UserRole.REFERRAL_HANDLER,
+        UserRole.STEWARD,
+        UserRole.ADMINISTRATOR,
+    }
+)
 
 
 class ReferralService:
@@ -42,10 +51,15 @@ class ReferralService:
         return self._to_schema(ref)
 
     async def list_referrals(
-        self, db: AsyncSession, status_filter: ReferralStatus | None = None
+        self,
+        db: AsyncSession,
+        user: AuthenticatedUser,
+        status_filter: ReferralStatus | None = None,
     ) -> list[ReferralResponse]:
-        """List referral tickets filtered optionally by workflow status."""
+        """List referral tickets scoped to requester unless user holds privileged handler role."""
         stmt = select(LocalReferral)
+        if not (user.roles & _REFERRAL_PRIVILEGED_ROLES):
+            stmt = stmt.where(LocalReferral.requester_id == user.user_id)
         if status_filter is not None:
             stmt = stmt.where(LocalReferral.status == status_filter.value)
         rows = (await db.execute(stmt.order_by(LocalReferral.created_at.desc()))).scalars().all()

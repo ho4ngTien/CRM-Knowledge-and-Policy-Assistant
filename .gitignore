@@ -52,12 +52,17 @@ Thumbs.db
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+test-results/
+playwright-report/
 
 # Temporary diagnostic & test output files
 *.txt
 !requirements.txt
+!prompts/*.txt
 SongNhat_RFP_Mapping
 
 .agents
 _restricted_out_of_repo/
 *.tsbuildinfo
+
+docs/work-packages/

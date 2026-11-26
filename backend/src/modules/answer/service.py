@@ -2,8 +2,9 @@
 
 import html
 import uuid
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -206,7 +207,11 @@ class AnswerOrchestratorService:
 
         task_id = request.task_id or f"TASK-{uuid.uuid4().hex[:8].upper()}"
         answer_id = f"ANS-{uuid.uuid4().hex[:10].upper()}"
-        pii_warning = scan_query_for_pii(request.question).warning_message_vi or None
+        pii_scan = scan_query_for_pii(request.question)
+        pii_warning = pii_scan.warning_message_vi or None
+        llm_question = (
+            pii_scan.redacted_preview if pii_scan.has_suspected_pii else request.question
+        )
         gov_date, is_hist, is_future = self._policy_gate.resolve_governing_date_vn(
             request.governing_date
         )
@@ -272,9 +277,13 @@ class AnswerOrchestratorService:
             return await self._record_and_return(db, user, pkg)
 
         # Layer 2: Deterministic Policy Gate (VN date, conflict hold, typed critical fields).
+        effective_requested_date = (
+            request.governing_date
+            or datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date()
+        )
         gate = self._policy_gate.evaluate_policy_gate(
             candidates or [],
-            requested_date=request.governing_date,
+            requested_date=effective_requested_date,
             allow_future_preview=request.allow_future_preview,
             critical_fields=critical_fields,
         )
@@ -358,11 +367,11 @@ class AnswerOrchestratorService:
 
         system_prompt = self.load_system_prompt()
         envelope = self.build_untrusted_prompt_envelope(
-            request.question, passages, list(gate.critical_fields)
+            llm_question, passages, list(gate.critical_fields)
         )
         gen_req = LLMGenerationRequest(
             task_id=task_id,
-            question=request.question,
+            question=llm_question,
             system_prompt=system_prompt,
             user_prompt_envelope=envelope,
             governing_date=gate.governing_date,

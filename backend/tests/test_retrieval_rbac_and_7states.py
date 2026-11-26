@@ -82,13 +82,18 @@ def make_passage(
 # TEST SUITE 1: RBAC 4-ROLES AUDIENCE FILTERING (SEC 01)
 # ==============================================================================
 
-def test_check_policy_audience_admin_bypass(sample_users: dict[str, AuthenticatedUser]) -> None:
-    """Administrator has global privilege to view any audience."""
+def test_check_policy_audience_admin_least_privilege(
+    sample_users: dict[str, AuthenticatedUser],
+) -> None:
+    """Administrator follows least-privilege audience matching without blanket bypass."""
     admin = sample_users["admin"]
-    assert check_policy_audience(admin, ["reader"])
-    assert check_policy_audience(admin, ["policy_owner"])
-    assert check_policy_audience(admin, ["steward"])
-    assert check_policy_audience(admin, ["confidential_legal"])
+    assert check_policy_audience(admin, ["administrator"])
+    assert check_policy_audience(admin, ["all"])
+    assert check_policy_audience(admin, ["public"])
+    assert not check_policy_audience(admin, ["reader"])
+    assert not check_policy_audience(admin, ["policy_owner"])
+    assert not check_policy_audience(admin, ["steward"])
+    assert not check_policy_audience(admin, ["confidential_legal"])
 
 
 def test_check_policy_audience_reader_isolation(sample_users: dict[str, AuthenticatedUser]) -> None:

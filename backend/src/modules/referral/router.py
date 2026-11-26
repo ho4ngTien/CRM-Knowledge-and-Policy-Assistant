@@ -34,8 +34,7 @@ async def list_local_referrals(
     current_user: AuthenticatedUser = Depends(get_current_user),
 ) -> list[ReferralResponse]:
     """List local referral tickets for tracking."""
-    _ = current_user
-    return await service.list_referrals(db, status_filter=status)
+    return await service.list_referrals(db, current_user, status_filter=status)
 
 
 @router.patch("/{referral_id}", response_model=ReferralResponse)

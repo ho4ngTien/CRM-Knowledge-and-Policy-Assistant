@@ -35,6 +35,33 @@ UNACCENT_NEGATIONS_MAP: dict[str, str] = {
     "huy": "hủy",
 }
 
+# Pre-compiled high-performance Regex patterns sorted by length descending (VN 01, ANS 02)
+_SORTED_UNACCENT = sorted(VIETNAMESE_UNACCENT_MAPPINGS.keys(), key=len, reverse=True)
+_PATTERN_UNACCENT = re.compile(
+    rf"(?<!\w)({'|'.join(re.escape(k) for k in _SORTED_UNACCENT)})(?!\w)",
+    re.IGNORECASE,
+)
+
+_SORTED_NEG = sorted(UNACCENT_NEGATIONS_MAP.keys(), key=len, reverse=True)
+_PATTERN_NEG = re.compile(
+    rf"(?<!\w)({'|'.join(re.escape(k) for k in _SORTED_NEG)})(?!\w)",
+    re.IGNORECASE,
+)
+
+_SORTED_PRESERVED_NEG = sorted(VIETNAMESE_NEGATIONS, key=len, reverse=True)
+_PATTERN_PRESERVED_NEG = re.compile(
+    rf"(?<!\w)({'|'.join(re.escape(k) for k in _SORTED_PRESERVED_NEG)})(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def _to_vn_date(dt: datetime | date, tz: ZoneInfo) -> date:
+    """Convert datetime/date to VN calendar date, localizing naive datetimes to VN TZ."""
+    if isinstance(dt, datetime):
+        localized = dt.astimezone(tz) if dt.tzinfo is not None else dt.replace(tzinfo=tz)
+        return localized.date()
+    return dt
+
 
 class RetrievalService:
     """Filters by permission/lifecycle before ranking and preserves Vietnamese negations."""
@@ -42,17 +69,13 @@ class RetrievalService:
     def detect_preserved_negations(self, text: str) -> list[str]:
         """Detect and isolate all approved Vietnamese negation markers (ANS 02, ANS 07)."""
         lowered = text.lower()
-        # Map unaccented negations first
-        for unacc, acc in UNACCENT_NEGATIONS_MAP.items():
-            pattern = rf"(?<!\w){re.escape(unacc)}(?!\w)"
-            if re.search(pattern, lowered):
-                lowered = re.sub(pattern, acc, lowered)
+        # Map unaccented negations first using compiled O(1) pattern
+        lowered = _PATTERN_NEG.sub(
+            lambda m: UNACCENT_NEGATIONS_MAP[m.group(0).lower()],
+            lowered,
+        )
 
-        found: list[str] = []
-        for neg in VIETNAMESE_NEGATIONS:
-            pattern = rf"(?<!\w){re.escape(neg)}(?!\w)"
-            if re.search(pattern, lowered):
-                found.append(neg)
+        found = [m.group(0).lower() for m in _PATTERN_PRESERVED_NEG.finditer(lowered)]
         return list(dict.fromkeys(found))
 
     def normalize_query_vi(self, query: str) -> tuple[str, list[str]]:
@@ -61,16 +84,16 @@ class RetrievalService:
         normalized = cleaned.lower()
 
         # Step 1: Map common unaccented CRM terms to standard Vietnamese accented terms (VN 01)
-        for unaccent, accented in VIETNAMESE_UNACCENT_MAPPINGS.items():
-            pattern = rf"(?<!\w){re.escape(unaccent)}(?!\w)"
-            if re.search(pattern, normalized):
-                normalized = re.sub(pattern, accented, normalized)
+        normalized = _PATTERN_UNACCENT.sub(
+            lambda m: VIETNAMESE_UNACCENT_MAPPINGS[m.group(0).lower()],
+            normalized,
+        )
 
         # Step 1b: Map unaccented negation variants to preserved accented negations
-        for unacc, acc in UNACCENT_NEGATIONS_MAP.items():
-            pattern = rf"(?<!\w){re.escape(unacc)}(?!\w)"
-            if re.search(pattern, normalized):
-                normalized = re.sub(pattern, acc, normalized)
+        normalized = _PATTERN_NEG.sub(
+            lambda m: UNACCENT_NEGATIONS_MAP[m.group(0).lower()],
+            normalized,
+        )
 
         # Step 2: Tokenize and expand approved CRM abbreviations (42 entries in glossary)
         tokens = re.findall(r"[\w]+", normalized)
@@ -119,10 +142,10 @@ class RetrievalService:
         limit = min(top_k or settings.ANSWER_MAX_PASSAGES, settings.ANSWER_MAX_PASSAGES)
         filtered: list[PassageSummary] = []
 
+        tz = ZoneInfo(settings.APP_TIMEZONE)
         target_date = governing_date
         if target_date is None:
-            now_tz = datetime.now(ZoneInfo(settings.APP_TIMEZONE))
-            target_date = now_tz.date()
+            target_date = datetime.now(tz).date()
 
         for p in candidates:
             # 1. RBAC & Audience Isolation (SEC 01)
@@ -145,8 +168,8 @@ class RetrievalService:
                     continue
 
             # 5. Strict 7-State Policy Lifecycle Filtering (KNW 03)
-            # 5a. Withdrawn is STRICT FAIL-CLOSED (Cấm tuyệt đối - không thể bypass)
-            if p.status == PolicyLifecycleStatus.WITHDRAWN:
+            # 5a. Withdrawn or tombstoned is STRICT FAIL-CLOSED
+            if p.is_tombstoned or p.status == PolicyLifecycleStatus.WITHDRAWN:
                 continue
 
             # 5b. Ingestion / Governance / Pre-publication states are 100% rejected
@@ -163,11 +186,7 @@ class RetrievalService:
             if p.status == PolicyLifecycleStatus.SCHEDULED:
                 if not allow_future_preview:
                     continue
-                eff_start = (
-                    p.effective_from.date()
-                    if isinstance(p.effective_from, datetime)
-                    else p.effective_from
-                )
+                eff_start = _to_vn_date(p.effective_from, tz)
                 if target_date < eff_start and not allow_future_preview:
                     continue
 
@@ -176,38 +195,22 @@ class RetrievalService:
                 if not allow_historical:
                     continue
                 if target_date is not None:
-                    eff_start = (
-                        p.effective_from.date()
-                        if isinstance(p.effective_from, datetime)
-                        else p.effective_from
-                    )
+                    eff_start = _to_vn_date(p.effective_from, tz)
                     if target_date < eff_start:
                         continue
                     if p.effective_to is not None:
-                        eff_end = (
-                            p.effective_to.date()
-                            if isinstance(p.effective_to, datetime)
-                            else p.effective_to
-                        )
+                        eff_end = _to_vn_date(p.effective_to, tz)
                         if target_date > eff_end:
                             continue
 
             # 5e. Effective policies (current active)
             elif p.status == PolicyLifecycleStatus.EFFECTIVE:
                 if target_date is not None:
-                    eff_start = (
-                        p.effective_from.date()
-                        if isinstance(p.effective_from, datetime)
-                        else p.effective_from
-                    )
+                    eff_start = _to_vn_date(p.effective_from, tz)
                     if target_date < eff_start:
                         continue
                     if p.effective_to is not None:
-                        eff_end = (
-                            p.effective_to.date()
-                            if isinstance(p.effective_to, datetime)
-                            else p.effective_to
-                        )
+                        eff_end = _to_vn_date(p.effective_to, tz)
                         if target_date > eff_end:
                             continue
 
@@ -292,5 +295,6 @@ class RetrievalService:
                 effective_from=version.effective_from,
                 effective_to=version.effective_to,
                 supersedes=version.supersedes_version_id,
+                is_tombstoned=passage.is_tombstoned,
             )
         return authoritative

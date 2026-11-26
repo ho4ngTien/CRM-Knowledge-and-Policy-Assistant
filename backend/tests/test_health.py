@@ -11,7 +11,7 @@ async def test_health(client):
     assert payload["status"] == "ok"
     assert payload["timezone"] == "Asia/Ho_Chi_Minh"
     assert payload["streaming_enabled"] is False
-    assert payload["mounted_modules"] == 12
+    assert payload["mounted_modules"] == 13
 
 
 @pytest.mark.asyncio

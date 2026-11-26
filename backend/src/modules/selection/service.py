@@ -20,9 +20,12 @@ Acceptance Criteria (G1-AC05, G1-AC06):
 
 from __future__ import annotations
 
+import math
+import re
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 from src.config import settings
@@ -43,7 +46,12 @@ from src.modules.selection.schemas import (
     SelectionResult,
 )
 from src.shared.contracts import PolicyGateDecision
-from src.shared.enums import ComparisonOperator, PolicyLifecycleStatus
+from src.shared.enums import (
+    AuthorityTier,
+    ComparisonOperator,
+    CriticalFieldType,
+    PolicyLifecycleStatus,
+)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -62,16 +70,27 @@ _DIMENSION_KEYS: tuple[str, ...] = (
     "transaction_scope",
 )
 
+_SORTED_DIM_UNACCENT = sorted(VIETNAMESE_UNACCENT_MAPPINGS.keys(), key=len, reverse=True)
+_PATTERN_DIM_UNACCENT = re.compile(
+    rf"(?<!\w)({'|'.join(re.escape(k) for k in _SORTED_DIM_UNACCENT)})(?!\w)",
+    re.IGNORECASE,
+)
+
+
+@lru_cache(maxsize=2048)
+def _normalize_dim_token_cached(value: str) -> str:
+    val = " ".join(value.strip().lower().split())
+    return _PATTERN_DIM_UNACCENT.sub(
+        lambda m: VIETNAMESE_UNACCENT_MAPPINGS[m.group(0).lower()],
+        val,
+    )
+
 
 def _normalize_dim_token(value: str | None) -> str | None:
     """Normalize whitespace and map unaccented phrases using VN 01 SUB08 dictionary."""
     if value is None:
         return None
-    val = " ".join(value.strip().lower().split())
-    for unacc, acc in VIETNAMESE_UNACCENT_MAPPINGS.items():
-        if unacc in val:
-            val = val.replace(unacc, acc)
-    return val
+    return _normalize_dim_token_cached(value)
 
 
 def _get_synonym_family(value: str) -> set[str]:
@@ -96,17 +115,8 @@ def _get_synonym_family(value: str) -> set[str]:
     return syns
 
 
-def _dim_matches(request_val: str | None, policy_val: str | None) -> bool:
-    """Return True when the policy dimension is compatible with the requested value.
-
-    Rules (DAT 04 / VN 01 / SUB08):
-    1. If the policy dimension is a wildcard → always matches.
-    2. If the request did not specify the dimension (None) → always matches.
-    3. Exact match after VN 01 unaccent normalization.
-    4. Match via approved SUB08 Vietnamese CRM synonym or technical terms glossary.
-    """
-    if policy_val is None:
-        return True
+def _single_dim_matches(request_val: str | None, policy_val: str) -> bool:
+    """Match a single policy dimension value against the requested value."""
     norm_policy = _normalize_dim_token(policy_val)
     if norm_policy in _WILDCARD_VALUES:
         return True
@@ -119,6 +129,26 @@ def _dim_matches(request_val: str | None, policy_val: str | None) -> bool:
     policy_syns = _get_synonym_family(policy_val)
     request_syns = _get_synonym_family(request_val)
     return bool(policy_syns & request_syns)
+
+
+def _dim_matches(request_val: str | None, policy_val: str | None) -> bool:
+    """Return True when the policy dimension is compatible with the requested value.
+
+    Rules (DAT 04 / VN 01 / SUB08):
+    1. If the policy dimension is a wildcard → always matches.
+    2. If the request did not specify the dimension (None) → always matches.
+    3. Comma-separated multi-values (e.g. ``HN,DN,HCM``) match if any item matches.
+    4. Exact match after VN 01 unaccent normalization.
+    5. Match via approved SUB08 Vietnamese CRM synonym or technical terms glossary.
+    """
+    if policy_val is None:
+        return True
+    if "," in policy_val:
+        items = [item.strip() for item in policy_val.split(",") if item.strip()]
+        if not items:
+            return False
+        return any(_single_dim_matches(request_val, item) for item in items)
+    return _single_dim_matches(request_val, policy_val)
 
 
 # ---------------------------------------------------------------------------
@@ -193,11 +223,33 @@ class SelectionService:
             ScopeMatchResult – ``matched=True`` only when ALL 6 dimensions pass.
         """
         scope_map: dict[str, str] = {}
-        for part in candidate.scope.split(";"):
-            part = part.strip()
-            if "=" in part:
+        for raw_part in candidate.scope.split(";"):
+            part = raw_part.strip()
+            if not part:
+                continue
+            colon_idx = part.find(":")
+            eq_idx = part.find("=")
+            if colon_idx == -1 and eq_idx == -1:
+                return ScopeMatchResult(
+                    version_id=candidate.version_id,
+                    matched=False,
+                    unmatched_dimensions=["malformed_scope"],
+                )
+            if colon_idx != -1 and (eq_idx == -1 or colon_idx < eq_idx):
+                key, _, val = part.partition(":")
+            else:
                 key, _, val = part.partition("=")
-                scope_map[key.strip().lower()] = val.strip().lower()
+            norm_key = key.strip().lower()
+            norm_val = val.strip().lower()
+            if not norm_key or not norm_val:
+                return ScopeMatchResult(
+                    version_id=candidate.version_id,
+                    matched=False,
+                    unmatched_dimensions=["malformed_scope"],
+                )
+            if norm_key == "customer_group":
+                norm_key = "customer_category"
+            scope_map[norm_key] = norm_val
 
         dim_values: dict[str, str | None] = {
             "company": dimensions.company,
@@ -292,17 +344,28 @@ class SelectionService:
                 if len(matching) >= cap:
                     break
 
-            # DAT 08: annotation completeness check
-            missing_ann = [
-                cf.field_id
-                for cf in matching
-                if not cf.source_clause.strip() or not cf.value.strip()
-            ]
+            # DAT 08: annotation completeness and unit/currency check
+            missing_ann: list[str] = []
+            for cf in matching:
+                if not cf.source_clause.strip() or not cf.value.strip():
+                    missing_ann.append(f"{cf.field_id} (thiếu source_clause hoặc value)")
+                elif (
+                    cf.field_type == CriticalFieldType.CURRENCY
+                    and not (cf.currency or "").strip()
+                ):
+                    missing_ann.append(f"{cf.field_id} (thiếu currency)")
+                elif (
+                    cf.field_type in {CriticalFieldType.NUMBER, CriticalFieldType.DURATION}
+                    and not (cf.unit or "").strip()
+                ):
+                    missing_ann.append(f"{cf.field_id} (thiếu unit)")
+
             has_missing = len(missing_ann) > 0
             missing_detail: str | None = None
             if has_missing:
                 missing_detail = (
-                    f"DAT 08: {len(missing_ann)} trường thiếu source_clause / value: "
+                    f"DAT 08: {len(missing_ann)} trường thiếu "
+                    "source_clause / value / unit / currency: "
                     + ", ".join(missing_ann[:5])
                     + ("…" if len(missing_ann) > 5 else "")
                 )
@@ -323,28 +386,130 @@ class SelectionService:
     # 4. Mandatory Hold Gate (DAT 04, DAT 05, DAT 08, OPS 03)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _parse_decimal(raw: Decimal | float | int | str) -> Decimal:
+        if isinstance(raw, bool):
+            raise ValueError(f"Boolean is not a valid numeric value: {raw}")
+        if isinstance(raw, Decimal):
+            return raw
+        if isinstance(raw, int):
+            return Decimal(raw)
+        if isinstance(raw, float):
+            if not math.isfinite(raw):
+                raise ValueError(f"Non-finite float is not a valid numeric value: {raw}")
+            return Decimal(str(raw))
+        s = str(raw).strip()
+        match = re.search(r"[-+]?\d+(?:[.,]\d+)*", s)
+        if not match:
+            raise ValueError(f"No numeric component found in: {raw}")
+        num_str = match.group(0)
+
+        # Clean thousand separators while preserving decimal fractions
+        if "," in num_str and "." in num_str:
+            if num_str.rfind(",") > num_str.rfind("."):
+                # Vietnamese / European locale: "1.000.000,50" -> "1000000.50"
+                num_str = num_str.replace(".", "").replace(",", ".")
+            else:
+                # US / UK locale: "1,000,000.50" -> "1000000.50"
+                num_str = num_str.replace(",", "")
+        elif "," in num_str:
+            parts = num_str.split(",")
+            int_part = parts[0].lstrip("+-")
+            if (
+                len(parts) > 1
+                and 1 <= len(int_part) <= 3
+                and int_part != "0"
+                and all(len(p) == 3 for p in parts[1:])
+            ):
+                num_str = num_str.replace(",", "")
+            else:
+                num_str = num_str.replace(",", ".")
+        elif "." in num_str:
+            parts = num_str.split(".")
+            int_part = parts[0].lstrip("+-")
+            if (
+                len(parts) >= 3
+                and 1 <= len(int_part) <= 3
+                and int_part != "0"
+                and all(len(p) == 3 for p in parts[1:])
+            ):
+                num_str = num_str.replace(".", "")
+
+        return Decimal(num_str)
+
     def evaluate_numeric_threshold(
-        self, operator: ComparisonOperator, actual: Decimal, target: str
+        self,
+        operator: ComparisonOperator | str,
+        actual: Decimal | float | int | str,
+        target: str,
     ) -> bool:
         """Compute threshold checks deterministically in Python (OPS 04, 0% LLM)."""
-        if operator == ComparisonOperator.BETWEEN:
-            low_s, high_s = [part.strip() for part in target.split(";", maxsplit=1)]
-            return Decimal(low_s) <= actual <= Decimal(high_s)
-        bound = Decimal(target.strip())
-        comparators = {
-            ComparisonOperator.LE: actual <= bound,
-            ComparisonOperator.LT: actual < bound,
-            ComparisonOperator.GE: actual >= bound,
-            ComparisonOperator.GT: actual > bound,
-            ComparisonOperator.EQ: actual == bound,
+        op_str = (
+            operator.value
+            if isinstance(operator, ComparisonOperator)
+            else str(operator).strip().lower()
+        )
+        op_map: dict[str, ComparisonOperator] = {
+            "<=": ComparisonOperator.LE,
+            "le": ComparisonOperator.LE,
+            "<": ComparisonOperator.LT,
+            "lt": ComparisonOperator.LT,
+            ">=": ComparisonOperator.GE,
+            "ge": ComparisonOperator.GE,
+            ">": ComparisonOperator.GT,
+            "gt": ComparisonOperator.GT,
+            "==": ComparisonOperator.EQ,
+            "=": ComparisonOperator.EQ,
+            "eq": ComparisonOperator.EQ,
+            "between": ComparisonOperator.BETWEEN,
+            "in": ComparisonOperator.IN,
+            "required": ComparisonOperator.REQUIRED,
         }
-        return comparators.get(operator, False)
+        resolved_op = op_map.get(op_str)
+        if resolved_op is None:
+            raise ValueError(f"Unsupported comparison operator: {operator}")
+
+        if resolved_op == ComparisonOperator.REQUIRED:
+            if isinstance(actual, bool):
+                return False
+            if isinstance(actual, float):
+                return math.isfinite(actual)
+            if isinstance(actual, Decimal):
+                return actual.is_finite()
+            if isinstance(actual, int):
+                return True
+            return bool(str(actual).strip())
+
+        actual_dec = self._parse_decimal(actual)
+
+        if resolved_op == ComparisonOperator.IN:
+            sep = ";" if ";" in target else ","
+            items = [part.strip() for part in target.split(sep) if part.strip()]
+            if not items:
+                return False
+            return any(actual_dec == self._parse_decimal(item) for item in items)
+
+        if resolved_op == ComparisonOperator.BETWEEN:
+            low_s, high_s = [part.strip() for part in target.split(";", maxsplit=1)]
+            return self._parse_decimal(low_s) <= actual_dec <= self._parse_decimal(high_s)
+
+        bound = self._parse_decimal(target)
+        comparators = {
+            ComparisonOperator.LE: actual_dec <= bound,
+            ComparisonOperator.LT: actual_dec < bound,
+            ComparisonOperator.GE: actual_dec >= bound,
+            ComparisonOperator.GT: actual_dec > bound,
+            ComparisonOperator.EQ: actual_dec == bound,
+        }
+        return comparators.get(resolved_op, False)
 
     def evaluate_hold(
         self,
         gate_decision: PolicyGateDecision,
         critical_field_results: list[CriticalFieldLookupResult],
         *,
+        applicable_version_ids: list[str] | tuple[str, ...] | None = None,
+        matched_candidates: list[ApplicabilityCandidate] | None = None,
         missing_tables_or_attachments: bool = False,
         missing_attachment_detail: str | None = None,
     ) -> SelectionHoldDecision:
@@ -360,20 +525,49 @@ class SelectionService:
         """
         triggers: list[HoldTrigger] = []
 
+        # Effective applicable version IDs (post 6-dim scope matching when candidates provided)
+        effective_version_ids: list[str] | tuple[str, ...] = (
+            applicable_version_ids
+            if applicable_version_ids is not None
+            else gate_decision.applicable_version_ids
+        )
+
         # --- DAT 04: No applicable policy version ---
-        if not gate_decision.applicable_version_ids:
+        if not effective_version_ids:
+            reason_vi = (
+                gate_decision.hold_reason
+                if (not gate_decision.can_proceed and gate_decision.hold_reason)
+                else (
+                    "DAT 04 Hold: Không tìm thấy phiên bản chính sách hiệu lực "
+                    "cho ngày chi phối và phạm vi; cần chuyển chủ sở hữu chính sách."
+                )
+            )
             triggers.append(
                 HoldTrigger(
                     code="DAT04_NO_APPLICABLE_VERSION",
-                    reason_vi=(
-                        "DAT 04 Hold: Không tìm thấy phiên bản chính sách hiệu lực "
-                        "cho ngày chi phối; cần chuyển chủ sở hữu chính sách."
-                    ),
+                    reason_vi=reason_vi,
                 )
             )
 
         # --- DAT 05: Source conflict ---
-        if gate_decision.has_conflict:
+        has_conflict = False
+        if matched_candidates is not None:
+            # Evaluate conflict specifically among candidates that matched 6 dimensions
+            non_note = [
+                c for c in matched_candidates
+                if c.authority_tier != AuthorityTier.STAFF_NOTE
+            ]
+            tiers = {c.authority_tier for c in non_note}
+            contract_vs_policy = (
+                AuthorityTier.CUSTOMER_CONTRACT in tiers
+                and AuthorityTier.POLICY in tiers
+            )
+            multiple_versions = len(non_note) > 1
+            has_conflict = contract_vs_policy or multiple_versions
+        else:
+            has_conflict = gate_decision.has_conflict
+
+        if has_conflict:
             triggers.append(
                 HoldTrigger(
                     code="DAT05_SOURCE_CONFLICT",
@@ -445,6 +639,8 @@ class SelectionService:
         all_critical_fields: list[CriticalFieldItem],
         gate_decision: PolicyGateDecision,
         requested_date: date | None = None,
+        allow_historical: bool = True,
+        allow_future_preview: bool = False,
         missing_tables_or_attachments: bool = False,
         missing_attachment_detail: str | None = None,
     ) -> SelectionResult:
@@ -463,6 +659,10 @@ class SelectionService:
             all_critical_fields: Pre-fetched critical field rows from DB.
             gate_decision: Layer-2 PolicyGateDecision (from PolicyService).
             requested_date: Optional caller-supplied date; falls back to today UTC+7.
+            allow_historical: Allow query on SUPERSEDED historical versions.
+            allow_future_preview: Allow preview of SCHEDULED future versions.
+            missing_tables_or_attachments: Flag for missing essential evidence.
+            missing_attachment_detail: Description of missing attachment/table.
 
         Returns:
             SelectionResult – fully deterministic, llm_used=False always.
@@ -472,16 +672,37 @@ class SelectionService:
         # Step 1: Governing date
         date_result = self.resolve_governing_date_vn(requested_date)
         gov_date = date_result.governing_date
+        effective_historical = date_result.is_historical and allow_historical
+        effective_future_preview = date_result.is_future_preview and allow_future_preview
 
         # Step 2: 6-dim scope matching
-        scope_matches = self.match_scope_6dim_bulk(
-            candidates,
-            dimensions,
-            gov_date,
-            allow_historical=date_result.is_historical,
-            allow_future_preview=date_result.is_future_preview,
-        )
-        applicable_ids = [m.version_id for m in scope_matches if m.matched]
+        if not gate_decision.can_proceed and not gate_decision.applicable_version_ids:
+            scope_matches = [
+                ScopeMatchResult(
+                    version_id=c.version_id,
+                    matched=False,
+                    unmatched_dimensions=list(_DIMENSION_KEYS),
+                )
+                for c in candidates
+            ]
+            matched_version_ids: set[str] = set()
+            matched_candidates: list[ApplicabilityCandidate] = []
+            applicable_ids: list[str] = []
+        else:
+            scope_matches = self.match_scope_6dim_bulk(
+                candidates,
+                dimensions,
+                gov_date,
+                allow_historical=effective_historical,
+                allow_future_preview=effective_future_preview,
+            )
+            matched_version_ids = {m.version_id for m in scope_matches if m.matched}
+            matched_candidates = [c for c in candidates if c.version_id in matched_version_ids]
+            applicable_ids = [
+                c.version_id
+                for c in matched_candidates
+                if c.authority_tier != AuthorityTier.STAFF_NOTE
+            ]
 
         # Step 3: Critical field lookup for applicable versions
         cf_lookup_results: list[CriticalFieldLookupResult] = []
@@ -498,6 +719,8 @@ class SelectionService:
         hold_decision = self.evaluate_hold(
             gate_decision,
             cf_lookup_results,
+            applicable_version_ids=applicable_ids if candidates else None,
+            matched_candidates=matched_candidates if candidates else None,
             missing_tables_or_attachments=missing_tables_or_attachments,
             missing_attachment_detail=missing_attachment_detail,
         )

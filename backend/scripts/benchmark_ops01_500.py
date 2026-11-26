@@ -1,11 +1,13 @@
-"""CKPA-60 (OPS 01) Benchmark: 500-row batch <= 30.0 min & 100% LKG preservation."""
+"""CKPA-60 / CKPA-75 (OPS 01) Benchmark: 500-row batch <= 30m, LKG & checksum fault injection."""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import csv
 import hashlib
 import io
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -13,7 +15,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
 from src.db import Base
@@ -41,7 +44,7 @@ OPS01_MAX_MINUTES = 30.0
 
 
 class _AsyncSessionAdapter:
-    """Expose async DB operations expected by IngestionService over an isolated Session."""
+    """Expose async DB operations expected by IngestionService over an isolated SQLite Session."""
 
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -64,9 +67,10 @@ class _AsyncSessionAdapter:
 
 @dataclass(frozen=True)
 class Ops01BenchmarkResult:
-    """Measured metrics for CKPA-60 OPS 01 500-row benchmark & LKG preservation."""
+    """Measured metrics for OPS 01 500-row benchmark, LKG & checksum fault injection."""
 
     run_at_vn: str
+    backend_engine: str
     baseline_rows: int
     total_batch_rows: int
     added_rows: int
@@ -83,6 +87,7 @@ class Ops01BenchmarkResult:
     passed_sla_30m: bool
     lkg_quarantine_preserved: bool
     lkg_failed_batch_preserved: bool
+    lkg_checksum_mismatch_preserved: bool
     idempotent_zero_duplicates: bool
     batch_id: str
 
@@ -100,7 +105,7 @@ def _serialize_csv(headers: tuple[str, ...], rows: list[dict[str, str]]) -> byte
     return output.getvalue().encode("utf-8")
 
 
-def _build_manifest(rows: list[dict[str, str]]) -> bytes:
+def _build_manifest(rows: list[dict[str, str]], tamper_record_id: str | None = None) -> bytes:
     checksum_fields = (
         "passage_id",
         "document_id",
@@ -113,11 +118,14 @@ def _build_manifest(rows: list[dict[str, str]]) -> bytes:
     manifest_rows = []
     for row in rows:
         canonical = "|".join(row.get(key, "") for key in checksum_fields)
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        if tamper_record_id and row["passage_id"] == tamper_record_id:
+            digest = "0" * 64
         manifest_rows.append(
             {
                 "record_type": "passage",
                 "record_id": row["passage_id"],
-                "sha256_checksum": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+                "sha256_checksum": digest,
                 **{
                     col: ""
                     for col in MANIFEST_CSV_COLUMNS
@@ -143,7 +151,6 @@ def _build_500_change_rows(
         "quarantined": [],
     }
 
-    # 1. 60 updates from baseline rows 0..59 (excluding any existing quarantined row)
     valid_baseline = [
         r for r in baseline_rows if r.get("has_essential_attachments", "").lower() == "true"
     ]
@@ -155,7 +162,6 @@ def _build_500_change_rows(
         change_rows.append(row)
         groups["updated"].append(row["passage_id"])
 
-    # 2. 30 tombstones from baseline rows 60..89
     for i in range(60, 90):
         row = dict(valid_baseline[i])
         row["record_action"] = "tombstone"
@@ -163,7 +169,6 @@ def _build_500_change_rows(
         change_rows.append(row)
         groups["tombstoned"].append(row["passage_id"])
 
-    # 3. 30 quarantine/error rows: 10 from existing baseline LKG + 20 new error rows
     for i in range(30):
         if i < 5 and (90 + i) < len(valid_baseline):
             row = dict(valid_baseline[90 + i])
@@ -177,7 +182,6 @@ def _build_500_change_rows(
         change_rows.append(row)
         groups["quarantined"].append(row["passage_id"])
 
-    # 4. 380 newly added rows
     template = dict(valid_baseline[0])
     for i in range(380):
         row = dict(template)
@@ -194,127 +198,154 @@ def _build_500_change_rows(
     return change_rows, groups
 
 
-async def run_ops01_benchmark() -> Ops01BenchmarkResult:
-    """Execute the full CKPA-60 OPS 01 benchmark and return measured metrics."""
+async def _execute_benchmark_with_db(
+    db: Any,
+    backend_engine: str,
+    run_tag: str,
+) -> Ops01BenchmarkResult:
+    """Execute OPS 01 benchmark, LKG verification, and checksum fault injection on given DB."""
     service = IngestionService()
     full_csv_bytes = (FULL_CORPUS_DIR / "Policy_Corpus_G1_Full.csv").read_bytes()
     full_manifest_bytes = (
         FULL_CORPUS_DIR / "Source_URI_And_Checksum_Manifest_G1_Full.csv"
     ).read_bytes()
     headers, baseline_rows = _read_csv(full_csv_bytes)
+    now_vn = datetime.now(VN_TZ)
 
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    tables: list[Any] = [
-        ImportBatch.__table__,
-        ImportManifest.__table__,
-        ImportRecord.__table__,
-        QuarantineRow.__table__,
-        Document.__table__,
-        DocumentVersion.__table__,
-        Passage.__table__,
+    print(
+        f"[OPS01][{backend_engine}] Importing baseline ({len(baseline_rows)} rows)...",
+        flush=True,
+    )
+    baseline_report = await service.import_csv_bytes(
+        db,
+        full_csv_bytes,
+        source_type="passages",
+        batch_type=BatchType.FULL_SNAPSHOT,
+        expected_rows=len(baseline_rows),
+        manifest_bytes=full_manifest_bytes,
+        idempotency_key=f"{run_tag}-baseline-lkg",
+        submitted_by="CKPA-60-S5",
+        batch_timestamp=now_vn,
+    )
+
+    change_rows, groups = _build_500_change_rows(baseline_rows)
+    lkg_watch_ids = groups["quarantined"][:5]
+    lkg_before: dict[str, str] = {}
+    for pid in lkg_watch_ids:
+        existing = await db.get(Passage, pid)
+        if existing is not None:
+            lkg_before[pid] = existing.content
+
+    change_csv = _serialize_csv(tuple(headers), change_rows)
+    change_manifest = _build_manifest(change_rows)
+
+    # Stage 1: Benchmark 500-row ingestion
+    print(f"[OPS01][{backend_engine}] Stage 1: importing 500-row delta batch...", flush=True)
+    t0 = time.perf_counter()
+    report_500 = await service.import_csv_bytes(
+        db,
+        change_csv,
+        source_type="passages",
+        batch_type=BatchType.DELTA,
+        expected_rows=500,
+        manifest_bytes=change_manifest,
+        idempotency_key=f"{run_tag}-ops01-500-rows",
+        submitted_by="CKPA-60-S5",
+        batch_timestamp=now_vn + timedelta(hours=8),
+    )
+    t1 = time.perf_counter()
+    print(
+        f"[OPS01][{backend_engine}] Stage 1 done in {t1 - t0:.2f}s "
+        f"(accepted={report_500.accepted_rows}, quarantined={report_500.quarantined_rows})",
+        flush=True,
+    )
+
+    # Stage 2: Benchmark indexing pass over active passages
+    active_result = await db.execute(
+        select(Passage).where(Passage.is_tombstoned.is_(False))
+    )
+    active_passages = active_result.scalars().all()
+    indexed_hashes = [
+        hashlib.sha256(f"{p.id}:{p.content}".encode()).hexdigest() for p in active_passages
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    assert len(indexed_hashes) == len(active_passages)
+    t2 = time.perf_counter()
 
-    with Session(engine) as session:
-        db = _AsyncSessionAdapter(session)
+    # Stage 3: Reconciliation, LKG & Fault Injection checks
+    lkg_quarantine_ok = True
+    for pid, expected_content in lkg_before.items():
+        current = await db.get(Passage, pid)
+        if current is None or current.content != expected_content or current.is_tombstoned:
+            lkg_quarantine_ok = False
+            break
 
-        now_vn = datetime.now(VN_TZ)
-        # Baseline LKG import (Full G1 Corpus from CKPA-58)
-        baseline_report = await service.import_csv_bytes(
-            db,  # type: ignore[arg-type]
-            full_csv_bytes,
-            source_type="passages",
-            batch_type=BatchType.FULL_SNAPSHOT,
-            expected_rows=len(baseline_rows),
-            manifest_bytes=full_manifest_bytes,
-            idempotency_key="ckpa60-baseline-lkg",
-            submitted_by="CKPA-60-S5",
-            batch_timestamp=now_vn,
-        )
+    count_result = await db.execute(select(func.count()).select_from(Passage))
+    total_passages_before_fail = int(count_result.scalar_one())
 
-        # Snapshot LKG rows that will be targeted by error rows
-        change_rows, groups = _build_500_change_rows(baseline_rows)
-        lkg_watch_ids = groups["quarantined"][:5]
-        lkg_before = {
-            pid: session.get(Passage, pid).content  # type: ignore[union-attr]
-            for pid in lkg_watch_ids
-            if session.get(Passage, pid) is not None
-        }
-
-        change_csv = _serialize_csv(tuple(headers), change_rows)
-        change_manifest = _build_manifest(change_rows)
-
-        # Stage 1: Benchmark 500-row ingestion
-        t0 = time.perf_counter()
-        report_500 = await service.import_csv_bytes(
-            db,  # type: ignore[arg-type]
+    # Negative test 1: stale batch rejected without modifying LKG
+    lkg_failed_batch_ok = False
+    try:
+        await service.import_csv_bytes(
+            db,
             change_csv,
             source_type="passages",
             batch_type=BatchType.DELTA,
             expected_rows=500,
             manifest_bytes=change_manifest,
-            idempotency_key="ckpa60-ops01-500-rows-v1",
+            idempotency_key=f"{run_tag}-ops01-stale-fail",
             submitted_by="CKPA-60-S5",
-            batch_timestamp=now_vn + timedelta(hours=8),
+            batch_timestamp=now_vn - timedelta(hours=8),
         )
-        t1 = time.perf_counter()
+    except StaleBatchRejected:
+        after_fail_res = await db.execute(select(func.count()).select_from(Passage))
+        lkg_failed_batch_ok = int(after_fail_res.scalar_one()) == total_passages_before_fail
 
-        # Stage 2: Benchmark indexing pass over accepted passages
-        active_passages = session.scalars(
-            select(Passage).where(Passage.is_tombstoned.is_(False))
-        ).all()
-        indexed_hashes = [
-            hashlib.sha256(f"{p.id}:{p.content}".encode()).hexdigest()
-            for p in active_passages
-        ]
-        assert len(indexed_hashes) == len(active_passages)
-        t2 = time.perf_counter()
+    # Negative test 2 (DEF-CKPA75-04): checksum mismatch fault injection preserves LKG 100%
+    tamper_row = dict(change_rows[0])
+    tamper_pid = tamper_row["passage_id"]
+    tamper_before = await db.get(Passage, tamper_pid)
+    tamper_expected_content = tamper_before.content if tamper_before else ""
+    tamper_row["content"] = f"{tamper_expected_content} [TAMPERED-FOR-FAULT-INJECT]"
+    tamper_csv = _serialize_csv(tuple(headers), [tamper_row])
+    tamper_manifest = _build_manifest([tamper_row], tamper_record_id=tamper_pid)
+    checksum_report = await service.import_csv_bytes(
+        db,
+        tamper_csv,
+        source_type="passages",
+        batch_type=BatchType.DELTA,
+        expected_rows=1,
+        manifest_bytes=tamper_manifest,
+        idempotency_key=f"{run_tag}-ops01-checksum-fault",
+        submitted_by="CKPA-60-S5",
+        batch_timestamp=now_vn + timedelta(hours=9),
+    )
+    tamper_after = await db.get(Passage, tamper_pid)
+    lkg_checksum_mismatch_ok = (
+        checksum_report.quarantined_rows == 1
+        and checksum_report.accepted_rows == 0
+        and any(i.reason_code == "CHECKSUM_MISMATCH" for i in checksum_report.quarantine_issues)
+        and tamper_after is not None
+        and tamper_after.content == tamper_expected_content
+    )
 
-        # Stage 3: Reconciliation & LKG checks
-        lkg_quarantine_ok = all(
-            (p := session.get(Passage, pid)) is not None
-            and p.content == expected_content
-            and not p.is_tombstoned
-            for pid, expected_content in lkg_before.items()
-        )
-        total_passages_before_fail = session.scalar(select(func.count()).select_from(Passage))
-
-        # Negative test: stale/failed batch must not alter LKG
-        lkg_failed_batch_ok = False
-        try:
-            await service.import_csv_bytes(
-                db,  # type: ignore[arg-type]
-                change_csv,
-                source_type="passages",
-                batch_type=BatchType.DELTA,
-                expected_rows=500,
-                manifest_bytes=change_manifest,
-                idempotency_key="ckpa60-ops01-stale-fail",
-                submitted_by="CKPA-60-S5",
-                batch_timestamp=now_vn - timedelta(hours=8),
-            )
-        except StaleBatchRejected:
-            total_after_fail = session.scalar(select(func.count()).select_from(Passage))
-            lkg_failed_batch_ok = total_after_fail == total_passages_before_fail
-
-        # Idempotent retry test: zero duplicates
-        retry_report = await service.import_csv_bytes(
-            db,  # type: ignore[arg-type]
-            change_csv,
-            source_type="passages",
-            batch_type=BatchType.DELTA,
-            expected_rows=500,
-            manifest_bytes=change_manifest,
-            idempotency_key="ckpa60-ops01-500-rows-v1",
-            submitted_by="CKPA-60-S5",
-            batch_timestamp=now_vn + timedelta(hours=8),
-        )
-        total_after_retry = session.scalar(select(func.count()).select_from(Passage))
-        idempotent_ok = (
-            retry_report.batch_id == report_500.batch_id
-            and total_after_retry == total_passages_before_fail
-        )
-        t3 = time.perf_counter()
+    # Idempotent retry test
+    retry_report = await service.import_csv_bytes(
+        db,
+        change_csv,
+        source_type="passages",
+        batch_type=BatchType.DELTA,
+        expected_rows=500,
+        manifest_bytes=change_manifest,
+        idempotency_key=f"{run_tag}-ops01-500-rows",
+        submitted_by="CKPA-60-S5",
+        batch_timestamp=now_vn + timedelta(hours=8),
+    )
+    after_retry_res = await db.execute(select(func.count()).select_from(Passage))
+    idempotent_ok = (
+        retry_report.batch_id == report_500.batch_id
+        and int(after_retry_res.scalar_one()) == total_passages_before_fail
+    )
+    t3 = time.perf_counter()
 
     ingest_sec = t1 - t0
     index_sec = t2 - t1
@@ -324,6 +355,7 @@ async def run_ops01_benchmark() -> Ops01BenchmarkResult:
 
     return Ops01BenchmarkResult(
         run_at_vn=datetime.now(VN_TZ).isoformat(),
+        backend_engine=backend_engine,
         baseline_rows=baseline_report.expected_rows,
         total_batch_rows=report_500.expected_rows,
         added_rows=len(groups["added"]),
@@ -340,19 +372,69 @@ async def run_ops01_benchmark() -> Ops01BenchmarkResult:
         passed_sla_30m=total_min <= OPS01_MAX_MINUTES,
         lkg_quarantine_preserved=lkg_quarantine_ok,
         lkg_failed_batch_preserved=lkg_failed_batch_ok,
+        lkg_checksum_mismatch_preserved=lkg_checksum_mismatch_ok,
         idempotent_zero_duplicates=idempotent_ok,
         batch_id=report_500.batch_id or "",
     )
 
 
+async def run_ops01_benchmark(database_url: str | None = None) -> Ops01BenchmarkResult:
+    """Run OPS 01 benchmark on PostgreSQL (when database_url provided) or isolated SQLite."""
+    tables: list[Any] = [
+        ImportBatch.__table__,
+        ImportManifest.__table__,
+        ImportRecord.__table__,
+        QuarantineRow.__table__,
+        Document.__table__,
+        DocumentVersion.__table__,
+        Passage.__table__,
+    ]
+    run_tag = f"ckpa60-{int(time.time() * 1000)}"
+
+    if database_url and database_url.startswith("postgresql"):
+        async_engine = create_async_engine(database_url)
+        try:
+            print(
+                "[OPS01][PostgreSQL] Preparing schema & truncating benchmark tables...",
+                flush=True,
+            )
+            async with async_engine.begin() as conn:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                await conn.run_sync(Base.metadata.create_all, tables=tables)
+                await conn.execute(text("SET LOCAL lock_timeout = '5s'"))
+                table_names = ", ".join(table.name for table in tables)
+                await conn.execute(text(f"TRUNCATE TABLE {table_names} RESTART IDENTITY CASCADE"))
+            session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
+                async_engine, expire_on_commit=False, autoflush=False
+            )
+            async with session_factory() as async_db:
+                return await _execute_benchmark_with_db(
+                    async_db,
+                    backend_engine="PostgreSQL 16 + pgvector",
+                    run_tag=run_tag,
+                )
+        finally:
+            await async_engine.dispose()
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=tables)
+    with Session(engine) as session:
+        db = _AsyncSessionAdapter(session)
+        return await _execute_benchmark_with_db(
+            db,
+            backend_engine="SQLite in-memory (isolated unit harness)",
+            run_tag=run_tag,
+        )
+
+
 def write_markdown_report(result: Ops01BenchmarkResult, output_path: Path = REPORT_PATH) -> Path:
-    """Write the CKPA-60 OPS 01 benchmark & LKG verification report to Markdown."""
+    """Write the OPS 01 benchmark, LKG & checksum fault injection report to Markdown."""
     lines = [
         "# CKPA-60: Báo cáo & Log Benchmark Hiệu năng OPS 01 (500 dòng <= 30p & LKG)",
         "",
         f"- **Thời điểm chạy (`Asia/Ho_Chi_Minh`):** `{result.run_at_vn}`",
         "- **Người thực hiện:** `[S5]` Nguyễn Ngọc Duy *(phối hợp `[S2]` Quốc Hưng)*",
-        "- **Môi trường:** Isolated Test Environment (`APP_ENV=test`, `SEC 06`)",
+        f"- **Database Engine:** `{result.backend_engine}` (`APP_ENV=test`, `SEC 06`)",
         f"- **Baseline LKG đầu vào (`CKPA-58`):** `{result.baseline_rows}` dòng "
         "(`data/g1/full/Policy_Corpus_G1_Full.csv`)",
         f"- **Batch ID (500-row OPS 01):** `{result.batch_id}`",
@@ -365,7 +447,7 @@ def write_markdown_report(result: Ops01BenchmarkResult, output_path: Path = REPO
         f"`{result.ingest_seconds / 60:.6f}p` | PASS |",
         f"| 2. Lập chỉ mục (`index_passages` hash/metadata) | `{result.index_seconds:.4f}s` | "
         f"`{result.index_seconds / 60:.6f}p` | PASS |",
-        f"| 3. Kiểm định LKG & Idempotency | `{result.reconcile_seconds:.4f}s` | "
+        f"| 3. Kiểm định LKG, Checksum Fault & Idempotency | `{result.reconcile_seconds:.4f}s` | "
         f"`{result.reconcile_seconds / 60:.6f}p` | PASS |",
         f"| **TỔNG THỜI GIAN (`OPS 01`)** | **`{result.total_seconds:.4f}s`** | "
         f"**`{result.total_minutes:.6f}p`** | **PASS (`<= 30.0p`)** |",
@@ -384,7 +466,7 @@ def write_markdown_report(result: Ops01BenchmarkResult, output_path: Path = REPO
         f"`{result.accepted_rows} accepted + {result.quarantined_rows} quarantined "
         f"+ {result.rejected_rows} rejected` |",
         "",
-        "## 3. Kiểm chứng Last-Known-Good (LKG) & Idempotency",
+        "## 3. Kiểm chứng Last-Known-Good (LKG), Checksum Fault & Idempotency",
         "",
         f"- **LKG khi có dòng lỗi trong batch 500 dòng:** "
         f"`{'100% NGUYÊN VẸN' if result.lkg_quarantine_preserved else 'FAILED'}` "
@@ -392,6 +474,9 @@ def write_markdown_report(result: Ops01BenchmarkResult, output_path: Path = REPO
         f"- **LKG khi có batch lỗi/trễ (`StaleBatchRejected`):** "
         f"`{'100% NGUYÊN VẸN' if result.lkg_failed_batch_preserved else 'FAILED'}` "
         "(batch trễ bị từ chối trước khi ghi đè, tổng số bản ghi LKG không thay đổi).",
+        f"- **LKG khi Fault-Inject `CHECKSUM_MISMATCH` (`DEF-CKPA75-04`):** "
+        f"`{'100% NGUYÊN VẸN' if result.lkg_checksum_mismatch_preserved else 'FAILED'}` "
+        "(bản ghi sai SHA-256 manifest bị cách ly quarantine, nội dung LKG không đổi).",
         f"- **Idempotent Retry (`idempotency_key` trùng):** "
         f"`{'PASS (0 bản sao)' if result.idempotent_zero_duplicates else 'FAILED'}`.",
         "",
@@ -402,10 +487,20 @@ def write_markdown_report(result: Ops01BenchmarkResult, output_path: Path = REPO
 
 
 def main() -> None:
-    """CLI entrypoint to run the CKPA-60 benchmark and write the Markdown report."""
-    result = asyncio.run(run_ops01_benchmark())
+    """CLI entrypoint to run the OPS 01 benchmark and write the Markdown report."""
+    parser = argparse.ArgumentParser(description="Run CKPA-60/75 OPS 01 500-row benchmark.")
+    parser.add_argument(
+        "--database-url",
+        default=os.getenv("OPS01_DATABASE_URL"),
+        help="Optional PostgreSQL async URL (e.g. postgresql+asyncpg://...).",
+    )
+    args = parser.parse_args()
+    result = asyncio.run(run_ops01_benchmark(database_url=args.database_url))
     report_file = write_markdown_report(result)
-    print(f"Benchmark completed in {result.total_seconds:.4f}s ({result.total_minutes:.6f} min)")
+    print(
+        f"Benchmark ({result.backend_engine}) completed in "
+        f"{result.total_seconds:.4f}s ({result.total_minutes:.6f} min)"
+    )
     print(f"Report written to: {report_file}")
 
 
