@@ -6,9 +6,11 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+from src.modules.answer.models import AnswerCitationRecord, AnswerPackageRecord
 from src.modules.answer.schemas import AnswerCitation, AnswerPackage, AnswerQueryRequest
 from src.modules.audit.service import AuditService
 from src.modules.knowledge.schemas import PassageSummary
@@ -676,6 +678,8 @@ class AnswerOrchestratorService:
         output_tokens: int = 0,
         is_error: bool = False,
     ) -> AnswerPackage:
+        if db is not None:
+            await self._persist_answer_package(db, user, package)
         await self._audit_meter.record_usage_meter(
             db,
             task_id=package.task_id,
@@ -698,6 +702,56 @@ class AnswerOrchestratorService:
             detail=package.hold_reason,
         )
         return package
+
+    async def _persist_answer_package(
+        self,
+        db: AsyncSession,
+        user: AuthenticatedUser,
+        package: AnswerPackage,
+    ) -> None:
+        """Persist citation links so KNW 04 can invalidate active answer packages."""
+        record = await db.get(AnswerPackageRecord, package.answer_id)
+        if record is None:
+            record = AnswerPackageRecord(
+                id=package.answer_id,
+                task_id=package.task_id,
+                user_id=user.user_id,
+                original_question=package.original_question,
+                governing_date=package.governing_date,
+                scope=package.scope,
+                status=package.status.value,
+                guidance_text=package.guidance_text,
+                hold_reason=package.hold_reason,
+                referral_target=package.referral_target,
+                is_stale=package.status == AnswerStatus.STALE,
+                llm_calls_used=package.llm_calls_used,
+                package_payload=package.model_dump(mode="json"),
+            )
+            db.add(record)
+        else:
+            record.status = package.status.value
+            record.guidance_text = package.guidance_text
+            record.hold_reason = package.hold_reason
+            record.referral_target = package.referral_target
+            record.is_stale = record.is_stale or package.status == AnswerStatus.STALE
+            record.llm_calls_used = package.llm_calls_used
+            record.package_payload = package.model_dump(mode="json")
+            await db.execute(
+                delete(AnswerCitationRecord).where(
+                    AnswerCitationRecord.answer_package_id == package.answer_id
+                )
+            )
+
+        for citation in package.citations:
+            db.add(
+                AnswerCitationRecord(
+                    answer_package_id=package.answer_id,
+                    passage_id=citation.passage_id,
+                    document_version_id=citation.document_version_id,
+                    page_number=citation.page_number,
+                    clause_ref=citation.clause_ref,
+                )
+            )
 
     def _detect_out_of_scope(self, question: str) -> str | None:
         lowered = question.lower()

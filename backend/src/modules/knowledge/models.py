@@ -91,3 +91,24 @@ class PassageEmbedding(TimestampMixin, Base):
     )
     embedding_model: Mapped[str] = mapped_column(String(128), nullable=False)
     embedding: Mapped[list[float]] = mapped_column(Vector(settings.EMBEDDING_DIM), nullable=False)
+
+
+class ChangeImpactReport(TimestampMixin, Base):
+    """Audit record for authoritative source changes and the answers they invalidate (KNW 04)."""
+
+    __tablename__ = "change_impact_reports"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    policy_version_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    document_version_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    actor_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    stale_answers_marked: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    active_view_refresh_interval_seconds: Mapped[int] = mapped_column(
+        Integer, default=60, nullable=False
+    )

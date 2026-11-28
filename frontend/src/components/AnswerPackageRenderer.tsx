@@ -36,11 +36,11 @@ import type {
 
 /** 5 exact Backend FeedbackReason values (KNW 01 / KNW 07). */
 const KNW01_FLAG_OPTIONS: { value: FeedbackReason; label: string }[] = [
-  { value: "missing_source",    label: "Thiếu nguồn / thiếu căn cứ (missing_source)" },
-  { value: "missing_exception", label: "Sai / thiếu ngoại lệ (missing_exception)" },
-  { value: "wrong_scope",       label: "Sai phạm vi 6 chiều (wrong_scope)" },
-  { value: "outdated_rule",     label: "Quy định đã lỗi thời (outdated_rule)" },
-  { value: "rejected",          label: "Sai nội dung / không chấp nhận (rejected)" },
+  { value: "missing_source",    label: "Thiếu nguồn (missing source)" },
+  { value: "outdated_rule",     label: "Quy định lỗi thời (obsolete rule)" },
+  { value: "wrong_scope",       label: "Sai phạm vi (wrong scope)" },
+  { value: "missing_exception", label: "Thiếu ngoại lệ (omitted exception)" },
+  { value: "rejected",          label: "Từ chối (rejection)" },
 ];
 
 const SCOPE_DIMENSION_LABELS: { key: string; label: string }[] = [

@@ -27,6 +27,7 @@ from src.modules.ingestion.schemas import (
     QuarantineIssue,
     QuarantineItemResponse,
 )
+from src.modules.knowledge.change_impact import ChangeImpactService
 from src.modules.knowledge.models import Document, DocumentVersion, Passage
 from src.modules.policy.models import CriticalField, Policy, PolicyVersion
 from src.shared.enums import (
@@ -174,6 +175,9 @@ class CorpusCeilingExceeded(Exception):
 class IngestionService:
     """Validates, isolates, and stages Base Scope 2-CSV imports."""
 
+    def __init__(self) -> None:
+        self._change_impact = ChangeImpactService()
+
     def validate_csv_bytes(
         self,
         raw_bytes: bytes,
@@ -262,7 +266,7 @@ class IngestionService:
                 validated=validated,
             )
         batch_id = uuid4().hex
-        applied_rows = await self._apply_authoritative_rows(
+        applied_rows, changed_document_versions = await self._apply_authoritative_rows(
             db,
             source_type=source_type,
             batch_type=batch_type,
@@ -270,6 +274,17 @@ class IngestionService:
             batch_timestamp=effective_batch_timestamp,
             validated=validated,
         )
+        for document_version_id in changed_document_versions:
+            await self._change_impact.record_impact(
+                db,
+                event_type="source_updated",
+                source_type=f"ingestion_{source_type}",
+                source_id=batch_id,
+                document_version_id=document_version_id,
+                policy_version_id=None,
+                actor_id=submitted_by,
+                reason="An accepted authoritative record changed in this import batch.",
+            )
         report = validated.report.model_copy(
             update={"batch_id": batch_id, "imported_rows": applied_rows}
         )
@@ -843,12 +858,13 @@ class IngestionService:
         batch_id: str,
         batch_timestamp: datetime,
         validated: _ValidatedBatch,
-    ) -> int:
+    ) -> tuple[int, set[str]]:
         """Apply accepted rows, preserve quarantined LKG, and reconcile full-snapshot omissions."""
         quarantined_ids = {
             issue.record_id for _, _, issue in validated.quarantined_rows if issue.record_id
         }
         applied = 0
+        changed_document_versions: set[str] = set()
         # Batch-prefetch existing authoritative rows and parent IDs to avoid N+1 round-trips.
         record_ids = {self._record_id(row, source_type) for _, row in validated.accepted_rows}
         existing_by_id: dict[str, Passage | CriticalField] = {}
@@ -965,6 +981,7 @@ class IngestionService:
 
                 if action in {RecordAction.TOMBSTONE.value, RecordAction.DELETE.value}:
                     if current is not None:
+                        changed_document_versions.add(current.document_version_id)
                         current.is_tombstoned = True
                         current.status = PolicyLifecycleStatus.WITHDRAWN.value
                         current.tombstoned_at = batch_timestamp
@@ -975,7 +992,15 @@ class IngestionService:
                     continue
 
                 if source_type == "passages":
-                    existing_by_id[record_id] = self._upsert_passage(
+                    previous_document_version_id = (
+                        current.document_version_id if current is not None else None
+                    )
+                    previous_values = (
+                        self._authoritative_source_values(current)
+                        if current is not None
+                        else None
+                    )
+                    updated_row: Passage | CriticalField = self._upsert_passage(
                         db,
                         row,
                         record_id,
@@ -985,8 +1010,17 @@ class IngestionService:
                         seen_documents=seen_documents,
                         seen_doc_versions=seen_doc_versions,
                     )
+                    existing_by_id[record_id] = updated_row
                 else:
-                    existing_by_id[record_id] = self._upsert_critical_field(
+                    previous_document_version_id = (
+                        current.document_version_id if current is not None else None
+                    )
+                    previous_values = (
+                        self._authoritative_source_values(current)
+                        if current is not None
+                        else None
+                    )
+                    updated_row = self._upsert_critical_field(
                         db,
                         row,
                         record_id,
@@ -998,6 +1032,12 @@ class IngestionService:
                         seen_policies=seen_policies,
                         seen_policy_versions=seen_policy_versions,
                     )
+                    existing_by_id[record_id] = updated_row
+                updated_values = self._authoritative_source_values(updated_row)
+                if previous_values is not None and previous_values != updated_values:
+                    if previous_document_version_id:
+                        changed_document_versions.add(previous_document_version_id)
+                    changed_document_versions.add(updated_row.document_version_id)
                 applied += 1
 
         if batch_type == BatchType.FULL_SNAPSHOT and validated.accepted_rows:
@@ -1012,6 +1052,7 @@ class IngestionService:
             for existing_row in existing_rows:
                 if existing_row.id in present_ids or existing_row.is_tombstoned:
                     continue
+                changed_document_versions.add(existing_row.document_version_id)
                 existing_row.is_tombstoned = True
                 existing_row.status = PolicyLifecycleStatus.WITHDRAWN.value
                 existing_row.tombstoned_at = batch_timestamp
@@ -1020,7 +1061,46 @@ class IngestionService:
                 existing_row.last_batch_timestamp = batch_timestamp
                 applied += 1
 
-        return applied
+        return applied, changed_document_versions
+
+    @staticmethod
+    def _authoritative_source_values(row: Passage | CriticalField) -> tuple[object, ...]:
+        if isinstance(row, Passage):
+            return (
+                row.document_id,
+                row.document_version_id,
+                row.title,
+                row.content,
+                row.source_ref,
+                row.page_number,
+                row.clause_ref,
+                row.language,
+                row.scope,
+                row.audience,
+                row.status,
+                row.has_essential_attachments,
+                row.is_tombstoned,
+            )
+        return (
+            row.policy_id,
+            row.policy_version_id,
+            row.document_version_id,
+            row.field_name,
+            row.field_type,
+            row.operator,
+            row.value,
+            row.unit,
+            row.currency,
+            row.approval_role,
+            row.time_limit,
+            row.exception_condition,
+            row.required_documents,
+            row.source_clause,
+            row.scope,
+            row.audience,
+            row.status,
+            row.is_tombstoned,
+        )
 
     @staticmethod
     def _compose_document_version_id(prefix: str, document_version_id: str) -> str:

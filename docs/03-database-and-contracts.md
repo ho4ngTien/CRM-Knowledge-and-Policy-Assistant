@@ -1,6 +1,6 @@
 # 03 — Cơ sở Dữ liệu & Hợp đồng Dữ liệu / API
 
-> Tài liệu đặc tả lược đồ cơ sở dữ liệu PostgreSQL 16 (`23` bảng ORM trên `9` module lưu trữ), chiến lược đánh chỉ mục tìm kiếm lai, hợp đồng `2` tệp CSV UTF-8, danh mục `12` nhóm API `/api/v1/*`, bảng mã lỗi Fail-Closed, cấu trúc JSON `AnswerPackage` `7` phần và thiết kế `shared/contracts.py` cho đội Dev ở Gate `G1`.
+> Tài liệu đặc tả lược đồ cơ sở dữ liệu PostgreSQL 16 (`24` bảng ORM trên `9` module lưu trữ), chiến lược đánh chỉ mục tìm kiếm lai, hợp đồng `2` tệp CSV UTF-8, danh mục `12` nhóm API `/api/v1/*`, bảng mã lỗi Fail-Closed, cấu trúc JSON `AnswerPackage` `7` phần và thiết kế `shared/contracts.py` cho đội Dev ở Gate `G1`.
 
 ---
 
@@ -213,6 +213,18 @@ erDiagram
         int page_number
         string clause_ref
     }
+    change_impact_reports {
+        string id PK
+        string event_type
+        string source_type
+        string source_id
+        string policy_version_id
+        string document_version_id
+        string actor_id
+        text reason
+        int stale_answers_marked
+        int active_view_refresh_interval_seconds
+    }
     local_referrals {
         string id PK
         string task_id
@@ -288,21 +300,23 @@ erDiagram
     }
 ```
 
-### 2.1 Tóm tắt 23 Bảng ORM theo Module & Chiến lược Index
+### 2.1 Tóm tắt 24 Bảng ORM theo Module & Chiến lược Index
 
 | Module | Danh sách Bảng ORM (`__tablename__`) | Ghi chú khóa & Chiến lược Index (Hiện tại + Migration G1) |
 |---|---|---|
 | `identity` | `users`, `user_roles` | `users.email` (`unique, index`), `user_roles(user_id, role_name)` (`uq_user_role`). |
-| `knowledge` | `documents`, `document_versions`, `passages`, `passage_embeddings` | `status`, `document_id`, `document_version_id`, `is_tombstoned` đánh B-Tree index. **G1 bổ sung:** (1) Composite B-Tree `(status, is_tombstoned, has_essential_attachments)` trên `passages` cho Pre-retrieval Filter; (2) GIN `to_tsvector('simple', unaccent(content))` + GIN `gin_trgm_ops` trên `passages.content`; (3) HNSW `vector_cosine_ops` trên `passage_embeddings.embedding` (`Vector(EMBEDDING_DIM)` = `1536`). |
+| `knowledge` | `documents`, `document_versions`, `passages`, `passage_embeddings`, `change_impact_reports` | `status`, `document_id`, `document_version_id`, `is_tombstoned` đánh B-Tree index. **G1 bổ sung:** (1) Composite B-Tree `(status, is_tombstoned, has_essential_attachments)` trên `passages` cho Pre-retrieval Filter; (2) GIN `to_tsvector('simple', unaccent(content))` + GIN `gin_trgm_ops` trên `passages.content`; (3) HNSW `vector_cosine_ops` trên `passage_embeddings.embedding` (`Vector(EMBEDDING_DIM)` = `1536`). `change_impact_reports` lưu thay đổi nguồn, số answer bị stale và giới hạn refresh view chủ động. |
 | `policy` | `authority_matrix`, `policies`, `policy_versions`, `critical_fields`, `policy_lifecycle_events` | **G1 bổ sung:** Composite B-Tree `(status, effective_from, effective_to)` trên `policy_versions` phục vụ lọc `governing_date` giờ VN; giữ audit bất biến trên `policy_lifecycle_events`. |
 | `ingestion` | `import_batches`, `import_manifests`, `import_records`, `quarantine_rows` | `import_batches.idempotency_key` (`unique`) đảm bảo retry idempotent; `import_records` lưu staging dòng hợp lệ, `quarantine_rows(batch_id, resolved)` hỗ trợ Steward xử lý hàng đợi lỗi. |
-| `answer` | `answer_packages`, `answer_citations` | Index `task_id`, `user_id`, `status`, `is_stale`, `answer_citations.document_version_id` giúp đánh dấu `is_stale=True` tức thời khi `AdminService.withdraw_policy_immediately` chạy. |
+| `answer` | `answer_packages`, `answer_citations` | Answer package và citations được lưu đồng bộ sau validation; index `task_id`, `user_id`, `status`, `is_stale`, `answer_citations.document_version_id` hỗ trợ đánh dấu stale khi lifecycle hoặc nguồn authoritative đổi. |
 | `referral` | `local_referrals` | Index `task_id`, `answer_package_id`, `requester_id`, `target_owner`, `status`. |
 | `feedback` | `feedback_candidates` | Index `task_id`, `answer_package_id`, `reporter_id`, `reason`; mặc định `auto_applied=False`. |
 | `audit` | `audit_logs`, `usage_cost_meters` | Index `actor_id`, `action`, `month_key`, `task_id` phục vụ tổng hợp quota tháng (`1.000` pkg / `2.000` calls). |
 | `evaluation` | `evaluation_runs`, `evaluation_case_results` | Index `release_gate`, `partition`, `run_id`, `case_id` tách biệt `real_200` (`dev_60/val_40/sealed_100`) và `challenges_80`. |
 
-*(Lưu ý: Toàn bộ 23 bảng đều kế thừa `TimestampMixin` với cột `created_at` và `updated_at` kiểu `DateTime(timezone=True)`.)*
+*(Lưu ý: Toàn bộ 24 bảng đều kế thừa `TimestampMixin` với cột `created_at` và `updated_at` kiểu `DateTime(timezone=True)`.)*
+
+**KNW 04 Change Impact:** Khi lifecycle sang `effective`, `superseded` hoặc `withdrawn`, khi thu hồi tức thời, hoặc khi ingestion thay đổi/tombstone nguồn authoritative, hệ thống ghi `change_impact_reports` và đồng bộ đánh dấu stale các answer package có citation đến document version bị ảnh hưởng. `POST /api/v1/validation/verify` đọc trạng thái stale đã lưu và kiểm tra lại passage/citation từ DB; không tin trạng thái do client gửi. Giao diện Chat/Evidence kiểm tra khi focus và polling mỗi `60` giây; thay đổi đang mở có thể được phát hiện trễ tối đa một chu kỳ polling.
 
 ---
 
@@ -405,12 +419,12 @@ Khớp 100% `CRITICAL_FIELDS_CSV_COLUMNS` trong [backend/src/modules/ingestion/s
 | **4. `policy`** | `GET /api/v1/policy/authority-matrix`, `GET /api/v1/policy/versions/{policy_version_id}/critical-fields`, `POST /api/v1/policy/threshold-check` | Authenticated | Đọc `5` lớp thẩm quyền, lấy `CriticalField` từ DB & tính so sánh biên ngoài LLM. |
 | **5. `retrieval`** | `POST /api/v1/retrieval/search` | Authenticated | Chuẩn hóa truy vấn tiếng Việt + tìm kiếm lai đã pre-filter (`<= 8` đoạn). |
 | **6. `answer`** | `POST /api/v1/answer`, `POST /api/v1/answer/follow-up`, `POST /api/v1/answer/regenerate` | Authenticated | Trả `AnswerPackage` `7` phần đồng bộ sau validation (không stream), giữ `task_id`. |
-| **7. `validation`** | `POST /api/v1/validation/verify` | Authenticated | Kiểm tra lại quyền `audience` và trạng thái nguồn DB ngay trước hiển thị (`KNW 04`). |
+| **7. `validation`** | `POST /api/v1/validation/verify` | Authenticated | Đọc stale flag đã lưu và kiểm tra lại từng citation/passage từ DB ngay trước hiển thị; trả `active_view_refresh_interval_seconds=60` (`KNW 04`). |
 | **8. `referral`** | `POST /api/v1/referral`, `GET /api/v1/referral`, `PATCH /api/v1/referral/{referral_id}` | Authenticated (`PATCH`: `policy_owner`, `referral_handler`, `steward`, `administrator`) | Tạo và cập nhật phiếu chuyển xử lý nội bộ (`referred` → `owner_responded` → `closed`). |
-| **9. `feedback`** | `POST /api/v1/feedback`, `GET /api/v1/feedback/candidates` | Authenticated | Ghi nhận `5` phân loại `KNW 07` vào hàng đợi `feedback_candidate` (`auto_applied=false`). |
+| **9. `feedback`** | `POST /api/v1/feedback`, `GET /api/v1/feedback/candidates`, `GET /api/v1/feedback/unanswered-topics` | Authenticated; danh sách/aggregate: `steward`, `policy_owner`, `administrator` | Ghi nhận đúng `5` phân loại `KNW 07` vào hàng đợi (`auto_applied=false`); thống kê topic ẩn danh chỉ trả nhóm có `k >= 5`, không trả reporter/task/answer IDs. |
 | **10. `audit`** | `GET /api/v1/audit/logs`, `GET /api/v1/audit/cost-meter`, `GET /api/v1/audit/export-open` | `privacy_security_owner`, `administrator` (`/logs`); `policy_owner`, `steward`, `administrator` | Xem audit log hạn chế quyền, theo dõi quota tháng & xuất dữ liệu mở `OPS 08`. |
 | **11. `evaluation`** | `POST /api/v1/evaluation/runs`, `GET /api/v1/evaluation/runs` | `independent_evaluator`, `administrator` (chặn dev truy cập `sealed_100`) | Ghi nhận & đọc kết quả đánh giá theo phân vùng độc lập Chinese Wall. |
-| **12. `admin`** | `POST /api/v1/admin/policies/{policy_version_id}/transition`, `POST /api/v1/admin/policies/{policy_version_id}/withdraw`, `POST /api/v1/admin/emergency-disable`, `GET /api/v1/admin/ops-summary` | `steward`/`policy_owner`/`administrator` (`withdraw`: `policy_owner`, `administrator`; `emergency-disable`: `administrator`) | Chuyển trạng thái vòng đời, rút chính sách tức thời (`<= 300s`), tắt khẩn cấp & xem cấu hình. |
+| **12. `admin`** | `POST /api/v1/admin/policies/{policy_version_id}/transition`, `POST /api/v1/admin/policies/{policy_version_id}/withdraw`, `POST /api/v1/admin/emergency-disable`, `GET /api/v1/admin/ops-summary`, `GET /api/v1/admin/change-impacts` | `steward`/`policy_owner`/`administrator` (`withdraw`: `policy_owner`, `administrator`; `emergency-disable`: `administrator`) | Chuyển trạng thái vòng đời, xem Change Impact, rút chính sách tức thời (`<= 300s`), tắt khẩn cấp & xem cấu hình. |
 
 ### 4.2 Bảng Mã lỗi Fail-Closed (`backend/src/main.py` & `shared/auth.py`)
 

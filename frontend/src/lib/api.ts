@@ -131,6 +131,35 @@ export async function getPassageById(
   return requestJson<PassageSummary>(`/knowledge/passages/${encodeURIComponent(passageId)}${qs}`);
 }
 
+export async function verifyAnswerCurrentState(answer: AnswerPackage): Promise<{
+  is_valid: boolean;
+  stale: boolean;
+  verified_citations_count: number;
+  errors: string[];
+  active_view_refresh_interval_seconds: number;
+}> {
+  return requestJson<{
+    is_valid: boolean;
+    stale: boolean;
+    verified_citations_count: number;
+    errors: string[];
+    active_view_refresh_interval_seconds: number;
+  }>("/validation/verify", {
+    method: "POST",
+    body: JSON.stringify({
+      answer_id: answer.answer_id,
+      citations: answer.citations.map((citation) => ({
+        passage_id: citation.passage_id,
+        document_id: citation.document_id,
+        document_version_id: citation.document_version_id,
+        quoted_text: citation.quoted_text,
+      })),
+      allow_historical: answer.is_historical,
+      allow_future_preview: answer.is_future_preview,
+    }),
+  });
+}
+
 /**
  * Document version lineage guarded by audience & unpublished status filtering.
  */

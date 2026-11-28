@@ -1,14 +1,23 @@
 """Governed feedback queue service (KNW 06 no-auto-train guard + KNW 07 reasons)."""
 
+import re
 import uuid
+from collections import Counter
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.modules.feedback.models import FeedbackCandidate
-from src.modules.feedback.schemas import FeedbackCandidateResponse, FeedbackCreateRequest
+from src.modules.feedback.schemas import (
+    FeedbackCandidateResponse,
+    FeedbackCreateRequest,
+    UnansweredTopicCount,
+)
 from src.shared.auth import AuthenticatedUser
 from src.shared.enums import FeedbackReason, PolicyLifecycleStatus
+from src.shared.pii_guard import scan_query_for_pii
+
+_ANONYMOUS_TOPIC_MIN_COUNT = 5
 
 
 class FeedbackService:
@@ -47,6 +56,32 @@ class FeedbackService:
         stmt = stmt.order_by(FeedbackCandidate.created_at.desc())
         rows = (await db.execute(stmt)).scalars().all()
         return [self._to_schema(r) for r in rows]
+
+    async def unanswered_topic_counts(
+        self, db: AsyncSession
+    ) -> list[UnansweredTopicCount]:
+        """Return topic-only aggregates with reporter/task identifiers excluded and k>=5."""
+        topics = (
+            await db.execute(
+                select(FeedbackCandidate.unanswered_topic).where(
+                    FeedbackCandidate.unanswered_topic.is_not(None)
+                )
+            )
+        ).scalars().all()
+        normalized = []
+        for topic in topics:
+            if not topic or not topic.strip():
+                continue
+            safe_topic = scan_query_for_pii(topic).redacted_preview
+            normalized_topic = re.sub(r"\s+", " ", safe_topic.strip()).casefold()
+            if normalized_topic:
+                normalized.append(normalized_topic)
+        counts = Counter(normalized)
+        return [
+            UnansweredTopicCount(topic=topic, count=count)
+            for topic, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+            if count >= _ANONYMOUS_TOPIC_MIN_COUNT
+        ]
 
     def _to_schema(self, row: FeedbackCandidate) -> FeedbackCandidateResponse:
         return FeedbackCandidateResponse(

@@ -30,3 +30,10 @@ class FeedbackCandidateResponse(BaseModel):
     candidate_status: str
     auto_applied: bool = False
     created_at: datetime
+
+
+class UnansweredTopicCount(BaseModel):
+    """Anonymous aggregated topic frequency, suppressed until k=5."""
+
+    topic: str
+    count: int = Field(..., ge=5)

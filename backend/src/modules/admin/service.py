@@ -2,24 +2,23 @@
 
 import logging
 from datetime import UTC, datetime
-from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from celery import Celery
 from kombu.exceptions import KombuError
-from sqlalchemy import update
-from sqlalchemy.engine import CursorResult
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.modules.admin.models import ALLOWED_LIFECYCLE_TRANSITIONS
+from src.modules.admin.models import ALLOWED_LIFECYCLE_TRANSITIONS, KNW03_LIFECYCLE_STATUSES
 from src.modules.admin.schemas import (
     AdminOpsSummaryResponse,
     InstantWithdrawalResponse,
     LifecycleTransitionResponse,
 )
-from src.modules.answer.models import AnswerCitationRecord, AnswerPackageRecord
-from src.modules.knowledge.models import DocumentVersion, Passage
+from src.modules.knowledge.change_impact import ChangeImpactService
+from src.modules.knowledge.change_impact_schemas import ChangeImpactReportResponse
+from src.modules.knowledge.models import ChangeImpactReport, DocumentVersion, Passage
 from src.modules.policy.models import CriticalField, PolicyLifecycleEvent, PolicyVersion
 from src.shared.auth import AuthenticatedUser
 from src.shared.contracts import CachePurgePort
@@ -33,6 +32,7 @@ class AdminService:
     def __init__(self) -> None:
         self._emergency_disabled: bool = False
         self._emergency_disable_reason: str | None = None
+        self._change_impact = ChangeImpactService()
 
     async def transition_policy_status(
         self,
@@ -49,6 +49,20 @@ class AdminService:
             raise PolicyNotFound(f"Policy version {policy_version_id} was not found.")
 
         current_status = PolicyLifecycleStatus(version.status)
+        if (
+            current_status == PolicyLifecycleStatus.QUARANTINED
+            or target_status == PolicyLifecycleStatus.QUARANTINED
+        ):
+            raise SourceConflict(
+                "QUARANTINED is a DAT 02 ingestion state and cannot be entered or exited "
+                "through the KNW 03 lifecycle transition API."
+            )
+        if current_status not in KNW03_LIFECYCLE_STATUSES or target_status not in (
+            KNW03_LIFECYCLE_STATUSES
+        ):
+            raise SourceConflict(
+                "Only the seven KNW 03 lifecycle states may use the lifecycle transition API."
+            )
         if target_status not in ALLOWED_LIFECYCLE_TRANSITIONS.get(current_status, frozenset()):
             raise SourceConflict(
                 f"Illegal transition from {current_status.value} to {target_status.value}."
@@ -88,8 +102,22 @@ class AdminService:
                 actor_id=user.user_id,
                 reason=reason,
             )
-        if target_status == PolicyLifecycleStatus.WITHDRAWN:
-            await self._mark_answers_stale(db, version.document_version_id)
+        impact_report = None
+        if target_status in {
+            PolicyLifecycleStatus.EFFECTIVE,
+            PolicyLifecycleStatus.SUPERSEDED,
+            PolicyLifecycleStatus.WITHDRAWN,
+        }:
+            impact_report = await self._change_impact.record_impact(
+                db,
+                event_type=f"lifecycle_{target_status.value}",
+                source_type="policy_lifecycle",
+                source_id=policy_version_id,
+                document_version_id=version.document_version_id,
+                policy_version_id=policy_version_id,
+                actor_id=user.user_id,
+                reason=reason,
+            )
 
         db.add(
             PolicyLifecycleEvent(
@@ -111,6 +139,7 @@ class AdminService:
             previous_status=current_status,
             current_status=target_status,
             actor_id=user.user_id,
+            change_impact_report_id=impact_report.id if impact_report else None,
         )
 
     async def withdraw_policy_immediately(
@@ -136,7 +165,16 @@ class AdminService:
             actor_id=user.user_id,
             reason=reason,
         )
-        stale_rowcount = await self._mark_answers_stale(db, version.document_version_id)
+        impact_report = await self._change_impact.record_impact(
+            db,
+            event_type="immediate_withdrawal",
+            source_type="policy_lifecycle",
+            source_id=policy_version_id,
+            document_version_id=version.document_version_id,
+            policy_version_id=policy_version_id,
+            actor_id=user.user_id,
+            reason=reason,
+        )
 
         db.add(
             PolicyLifecycleEvent(
@@ -156,9 +194,38 @@ class AdminService:
         return InstantWithdrawalResponse(
             policy_version_id=policy_version_id,
             status=PolicyLifecycleStatus.WITHDRAWN,
-            stale_answers_marked=stale_rowcount,
+            stale_answers_marked=impact_report.stale_answers_marked,
             cache_purge_deadline_seconds=settings.CACHE_WITHDRAWAL_MAX_SECONDS,
+            change_impact_report_id=impact_report.id,
         )
+
+    async def list_change_impacts(
+        self,
+        db: AsyncSession,
+        *,
+        policy_version_id: str | None = None,
+        limit: int = 50,
+    ) -> list[ChangeImpactReportResponse]:
+        statement = select(ChangeImpactReport).order_by(ChangeImpactReport.created_at.desc())
+        if policy_version_id is not None:
+            statement = statement.where(ChangeImpactReport.policy_version_id == policy_version_id)
+        rows = (await db.execute(statement.limit(limit))).scalars().all()
+        return [
+            ChangeImpactReportResponse(
+                id=row.id,
+                event_type=row.event_type,
+                source_type=row.source_type,
+                source_id=row.source_id,
+                document_version_id=row.document_version_id,
+                policy_version_id=row.policy_version_id,
+                actor_id=row.actor_id,
+                reason=row.reason,
+                stale_answers_marked=row.stale_answers_marked,
+                active_view_refresh_interval_seconds=row.active_view_refresh_interval_seconds,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
 
     async def _sync_authoritative_status(
         self,
@@ -197,22 +264,6 @@ class AdminService:
             .where(CriticalField.policy_version_id == policy_version_id)
             .values(**field_values)
         )
-
-    @staticmethod
-    async def _mark_answers_stale(db: AsyncSession, document_version_id: str) -> int:
-        stmt = (
-            update(AnswerPackageRecord)
-            .where(
-                AnswerPackageRecord.id.in_(
-                    AnswerCitationRecord.__table__.select()
-                    .with_only_columns(AnswerCitationRecord.answer_package_id)
-                    .where(AnswerCitationRecord.document_version_id == document_version_id)
-                )
-            )
-            .values(is_stale=True)
-        )
-        stale_result = await db.execute(stmt)
-        return int(cast(CursorResult[Any], stale_result).rowcount or 0)
 
     @staticmethod
     async def _trigger_cache_purge(
