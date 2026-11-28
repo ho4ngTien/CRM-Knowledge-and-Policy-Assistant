@@ -63,6 +63,11 @@ Tất cả lịch trình chạy theo múi giờ **`Asia/Ho_Chi_Minh`** (`app.con
 | `withdraw_and_purge_cache` | Sự kiện tức thời (on-demand) | Chạy ngay khi `Policy Owner` / `Administrator` gọi `POST /api/v1/admin/policies/{id}/withdraw`; `SCAN` và `DEL` toàn bộ khóa `ans:*{id}*`, `ret:*{id}*` trong Redis với hạn tối đa **`<= 300s` (`<= 5` phút)**. |
 | `run_batch_import` & `index_passages` | Khi Steward nạp CSV | Xử lý idempotent lô `<= 500` dòng trong `<= 30` phút (`OPS 01`) và cập nhật `Vector(1536)` trong `passage_embeddings`. |
 
+### 2.1 KNW 03/04/07 — Workflow, Change Impact & Feedback
+- **Workflow KNW 03:** Bảy trạng thái chính thức là `draft → owner_reviewed → approved → scheduled → effective → superseded / withdrawn`; `quarantined` thuộc riêng DAT 02 và không phải trạng thái lifecycle. Lệnh chuyển sang `effective` bị từ chối nếu `effective_from` còn ở tương lai theo `Asia/Ho_Chi_Minh`; worker chỉ kích hoạt `scheduled` khi đã đến hạn.
+- **Change Impact KNW 04:** Lifecycle thay đổi và sửa đổi/tombstone nguồn từ ingestion tạo report, đánh dấu answer package có citation liên quan là stale trong cùng transaction. `/api/v1/validation/verify` kiểm tra authoritative DB state. Chat và Evidence Viewer làm mới khi cửa sổ focus và mỗi 60 giây; đây là giới hạn refresh của active view, không phải cam kết push tức thời.
+- **Feedback KNW 07:** Năm nhãn hiển thị là `missing source`, `obsolete rule`, `wrong scope`, `omitted exception`, `rejection` (API giữ mã tương thích `missing_source`, `outdated_rule`, `wrong_scope`, `missing_exception`, `rejected`). Mọi phản hồi được giữ làm candidate (`auto_applied=false`), tuyệt đối không tự huấn luyện hay cập nhật tri thức. Aggregate unanswered topics chuẩn hóa/ẩn PII phổ biến và chỉ hiển thị nhóm có ít nhất năm phản hồi; aggregate không xuất ID người gửi, task hoặc answer.
+
 ---
 
 ## 3. Chiến lược Kiểm thử 4 Tầng & Hàng rào Chinese Wall

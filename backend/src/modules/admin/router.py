@@ -1,6 +1,6 @@
 """Admin governance HTTP router (/api/v1/admin/*)."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import get_db
@@ -13,6 +13,7 @@ from src.modules.admin.schemas import (
     LifecycleTransitionResponse,
 )
 from src.modules.admin.service import AdminService
+from src.modules.knowledge.change_impact_schemas import ChangeImpactReportResponse
 from src.shared.auth import AuthenticatedUser, require_roles
 from src.shared.enums import UserRole
 
@@ -70,3 +71,19 @@ async def get_admin_ops_summary(
     """Inspect active RFP/SRS Base Scope limits and runtime flags."""
     _ = current_user
     return service.get_ops_summary()
+
+
+@router.get("/change-impacts", response_model=list[ChangeImpactReportResponse])
+async def list_change_impacts(
+    policy_version_id: str | None = Query(default=None, max_length=64),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(
+        require_roles(UserRole.STEWARD, UserRole.POLICY_OWNER, UserRole.ADMINISTRATOR)
+    ),
+) -> list[ChangeImpactReportResponse]:
+    """List source/lifecycle change reports and stale-answer counts (KNW 04)."""
+    _ = current_user
+    return await service.list_change_impacts(
+        db, policy_version_id=policy_version_id, limit=limit
+    )

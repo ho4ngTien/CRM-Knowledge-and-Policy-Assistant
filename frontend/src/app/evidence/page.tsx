@@ -30,6 +30,8 @@ const STATUS_LABELS: Record<PolicyLifecycleStatus, { label: string; color: strin
   quarantined:        { label: "Cách ly",      color: "#7f1d1d" },
 };
 
+const ACTIVE_VIEW_REFRESH_INTERVAL_MS = 60_000;
+
 function StatusTag({ status }: { status: PolicyLifecycleStatus }) {
   const cfg = STATUS_LABELS[status] ?? { label: status, color: "#334155" };
   return (
@@ -99,6 +101,36 @@ export default function EvidenceViewerPage() {
     };
   }, [passageId, allowHistorical]);
 
+  useEffect(() => {
+    if (!passageId) return;
+    let cancelled = false;
+    const refreshPassage = async () => {
+      try {
+        const latest = await getPassageById(passageId, allowHistorical);
+        if (!cancelled) {
+          setPassage(latest);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPassage(null);
+          setError(err instanceof Error ? err.message : "Không thể xác minh nguồn hiện tại.");
+        }
+      }
+    };
+    const onFocus = () => void refreshPassage();
+    const intervalId = window.setInterval(
+      () => void refreshPassage(),
+      ACTIVE_VIEW_REFRESH_INTERVAL_MS
+    );
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [passageId, allowHistorical]);
+
   return (
     <main
       style={{
@@ -135,7 +167,8 @@ export default function EvidenceViewerPage() {
       >
         <strong>KNW 02:</strong> Kiểm tra quyền <code>audience</code> và trạng thái{" "}
         <code>effective / superseded / withdrawn</code> trực tiếp qua{" "}
-        <code>GET /api/v1/knowledge/passages/{"{passage_id}"}</code>.
+        <code>GET /api/v1/knowledge/passages/{"{passage_id}"}</code>. Trang tự kiểm tra lại khi focus
+        và mỗi 60 giây; thay đổi có thể trễ tối đa một chu kỳ polling.
       </p>
 
       {!passageId && (

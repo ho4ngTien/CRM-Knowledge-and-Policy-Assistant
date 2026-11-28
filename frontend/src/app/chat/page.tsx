@@ -16,9 +16,9 @@ import {
   askFollowUpQuestion,
   askPolicyQuestion,
   createLocalReferral,
-  getPassageById,
   regenerateAnswerPackage,
   submitKNW01Flag,
+  verifyAnswerCurrentState,
 } from "../../lib/api";
 import type { AnswerPackage, FeedbackReason, PolicyFamily } from "../../types/answer";
 
@@ -49,13 +49,8 @@ export default function ChatWorkspacePage() {
       return;
     }
     try {
-      const checks = await Promise.all(
-        current.citations.map((c) => getPassageById(c.passage_id, current.is_historical))
-      );
-      const anyInvalid = checks.some(
-        (p) => p.is_tombstoned || p.status === "withdrawn" || p.status === "quarantined"
-      );
-      if (anyInvalid) {
+      const verification = await verifyAnswerCurrentState(current);
+      if (!verification.is_valid || verification.stale) {
         setAnswer((prev) =>
           prev
             ? {
@@ -64,30 +59,34 @@ export default function ChatWorkspacePage() {
                 citations: [],
                 verbatim_quotes: [],
                 critical_fields: [],
-                hold_reason: "Source withdrawn or tombstoned while workspace was open (KNW 04).",
+                hold_reason:
+                  verification.errors.join(" ") ||
+                  "Authoritative source changed while workspace was open (KNW 04).",
               }
             : null
         );
         setStatusNote(
-          "Cảnh báo STALE: Chính sách trích dẫn vừa bị thu hồi. Tuyệt đối không dùng hướng dẫn cũ."
+          "Cảnh báo STALE: Nguồn hoặc quyền truy cập đã thay đổi. Tuyệt đối không dùng hướng dẫn cũ."
         );
       }
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        setAnswer((prev) =>
-          prev
-            ? {
-                ...prev,
-                status: "stale",
-                citations: [],
-                verbatim_quotes: [],
-                critical_fields: [],
-                hold_reason: "HTTP 409 POLICY_WITHDRAWN detected on re-verification.",
-              }
-            : null
-        );
-        setStatusNote("Cảnh báo STALE: Nguồn chính sách vừa bị thu hồi (HTTP 409).");
-      }
+      const message =
+        err instanceof ApiError && err.status === 409
+          ? "Nguồn chính sách vừa bị thu hồi (HTTP 409)."
+          : "Không thể xác minh trạng thái nguồn hiện tại.";
+      setAnswer((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "stale",
+              citations: [],
+              verbatim_quotes: [],
+              critical_fields: [],
+              hold_reason: message,
+            }
+          : null
+      );
+      setStatusNote(`Cảnh báo STALE: ${message} Tạm ngưng sử dụng hướng dẫn cũ.`);
     }
   }, []);
 

@@ -19,6 +19,7 @@ class LifecycleTransitionResponse(BaseModel):
     previous_status: PolicyLifecycleStatus
     current_status: PolicyLifecycleStatus
     actor_id: str
+    change_impact_report_id: str | None = None
 
 
 class InstantWithdrawalRequest(BaseModel):
@@ -34,6 +35,7 @@ class InstantWithdrawalResponse(BaseModel):
     status: PolicyLifecycleStatus = PolicyLifecycleStatus.WITHDRAWN
     stale_answers_marked: int
     cache_purge_deadline_seconds: int
+    change_impact_report_id: str
 
 
 class EmergencyDisableRequest(BaseModel):

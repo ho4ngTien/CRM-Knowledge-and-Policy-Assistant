@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 
 from src.db import Base
+from src.modules.answer.models import AnswerCitationRecord, AnswerPackageRecord
 from src.modules.ingestion.models import (
     ImportBatch,
     ImportManifest,
@@ -31,7 +32,7 @@ from src.modules.ingestion.service import (
     IngestionService,
     StaleBatchRejected,
 )
-from src.modules.knowledge.models import Document, DocumentVersion, Passage
+from src.modules.knowledge.models import ChangeImpactReport, Document, DocumentVersion, Passage
 from src.shared.enums import BatchType
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -388,6 +389,9 @@ async def run_ops01_benchmark(database_url: str | None = None) -> Ops01Benchmark
         Document.__table__,
         DocumentVersion.__table__,
         Passage.__table__,
+        AnswerPackageRecord.__table__,
+        AnswerCitationRecord.__table__,
+        ChangeImpactReport.__table__,
     ]
     run_tag = f"ckpa60-{int(time.time() * 1000)}"
 

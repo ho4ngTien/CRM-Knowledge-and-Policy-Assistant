@@ -2,16 +2,24 @@
 
 from src.shared.enums import PolicyLifecycleStatus
 
+KNW03_LIFECYCLE_STATUSES: frozenset[PolicyLifecycleStatus] = frozenset(
+    {
+        PolicyLifecycleStatus.DRAFT,
+        PolicyLifecycleStatus.OWNER_REVIEWED,
+        PolicyLifecycleStatus.APPROVED,
+        PolicyLifecycleStatus.SCHEDULED,
+        PolicyLifecycleStatus.EFFECTIVE,
+        PolicyLifecycleStatus.SUPERSEDED,
+        PolicyLifecycleStatus.WITHDRAWN,
+    }
+)
+
 ALLOWED_LIFECYCLE_TRANSITIONS: dict[PolicyLifecycleStatus, frozenset[PolicyLifecycleStatus]] = {
     PolicyLifecycleStatus.DRAFT: frozenset(
         {
             PolicyLifecycleStatus.OWNER_REVIEWED,
-            PolicyLifecycleStatus.QUARANTINED,
             PolicyLifecycleStatus.WITHDRAWN,
         }
-    ),
-    PolicyLifecycleStatus.QUARANTINED: frozenset(
-        {PolicyLifecycleStatus.DRAFT, PolicyLifecycleStatus.WITHDRAWN}
     ),
     PolicyLifecycleStatus.OWNER_REVIEWED: frozenset(
         {

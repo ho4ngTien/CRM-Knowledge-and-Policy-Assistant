@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from src.db import Base
+from src.modules.answer.models import AnswerCitationRecord, AnswerPackageRecord
 from src.modules.ingestion.models import (
     ImportBatch,
     ImportManifest,
@@ -25,13 +26,18 @@ from src.modules.ingestion.service import (
     IngestionService,
     StaleBatchRejected,
 )
-from src.modules.knowledge.models import Document, DocumentVersion, Passage
+from src.modules.knowledge.models import ChangeImpactReport, Document, DocumentVersion, Passage
 from src.modules.policy.models import CriticalField, Policy, PolicyVersion
 from src.shared.enums import BatchType, PolicyFamily
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FAMILY1 = REPO_ROOT / "data" / "g1" / "family1"
 SERVICE = IngestionService()
+_CHANGE_IMPACT_TABLES = [
+    AnswerPackageRecord.__table__,
+    AnswerCitationRecord.__table__,
+    ChangeImpactReport.__table__,
+]
 
 
 class _AsyncSessionAdapter:
@@ -238,7 +244,7 @@ async def test_import_persists_accepted_rows_manifest_and_quarantine() -> None:
         DocumentVersion.__table__,
         Passage.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    Base.metadata.create_all(engine, tables=[*tables, *_CHANGE_IMPACT_TABLES])
     with Session(engine) as session:
         db = _AsyncSessionAdapter(session)
         report = await SERVICE.import_csv_bytes(
@@ -307,7 +313,7 @@ async def test_import_rejects_idempotency_key_reuse_with_different_content() -> 
         PolicyVersion.__table__,
         CriticalField.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    Base.metadata.create_all(engine, tables=[*tables, *_CHANGE_IMPACT_TABLES])
     with Session(engine) as session:
         db = _AsyncSessionAdapter(session)
         await SERVICE.import_csv_bytes(
@@ -352,7 +358,7 @@ async def test_full_snapshot_partial_apply_and_quarantined_lkg_is_preserved() ->
         DocumentVersion.__table__,
         Passage.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    Base.metadata.create_all(engine, tables=[*tables, *_CHANGE_IMPACT_TABLES])
     with Session(engine) as session:
         db = _AsyncSessionAdapter(session)
         original = Passage(
@@ -410,7 +416,7 @@ async def test_stale_batch_is_rejected_before_authoritative_apply() -> None:
         PolicyVersion.__table__,
         CriticalField.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    Base.metadata.create_all(engine, tables=[*tables, *_CHANGE_IMPACT_TABLES])
     with Session(engine) as session:
         db = _AsyncSessionAdapter(session)
         await SERVICE.import_csv_bytes(
@@ -455,7 +461,7 @@ async def test_delta_missing_rows_are_not_tombstoned() -> None:
         DocumentVersion.__table__,
         Passage.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    Base.metadata.create_all(engine, tables=[*tables, *_CHANGE_IMPACT_TABLES])
     with Session(engine) as session:
         db = _AsyncSessionAdapter(session)
         existing = Passage(
@@ -541,7 +547,7 @@ async def test_composite_doc_version_id_prevents_cross_document_collision() -> N
         DocumentVersion.__table__,
         Passage.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    Base.metadata.create_all(engine, tables=[*tables, *_CHANGE_IMPACT_TABLES])
     with Session(engine) as session:
         db = _AsyncSessionAdapter(session)
         await SERVICE.import_csv_bytes(
@@ -584,7 +590,7 @@ async def test_full_snapshot_tombstones_omitted_document_passages() -> None:
         DocumentVersion.__table__,
         Passage.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    Base.metadata.create_all(engine, tables=[*tables, *_CHANGE_IMPACT_TABLES])
     with Session(engine) as session:
         db = _AsyncSessionAdapter(session)
         omitted = Passage(
@@ -639,7 +645,7 @@ async def test_critical_field_import_creates_parent_policy_and_policy_version() 
         PolicyVersion.__table__,
         CriticalField.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    Base.metadata.create_all(engine, tables=[*tables, *_CHANGE_IMPACT_TABLES])
     with Session(engine) as session:
         db = _AsyncSessionAdapter(session)
         await SERVICE.import_csv_bytes(
@@ -686,7 +692,7 @@ async def test_enforce_corpus_ceiling_rejects_over_limit_batch(
         DocumentVersion.__table__,
         Passage.__table__,
     ]
-    Base.metadata.create_all(engine, tables=tables)
+    Base.metadata.create_all(engine, tables=[*tables, *_CHANGE_IMPACT_TABLES])
     with Session(engine) as session:
         db = _AsyncSessionAdapter(session)
         with pytest.raises(CorpusCeilingExceeded):

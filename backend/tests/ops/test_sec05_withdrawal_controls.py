@@ -15,7 +15,7 @@ from src.db import Base
 from src.modules.admin.service import AdminService
 from src.modules.answer.models import AnswerCitationRecord, AnswerPackageRecord
 from src.modules.ingestion.models import ImportBatch
-from src.modules.knowledge.models import Document, DocumentVersion, Passage
+from src.modules.knowledge.models import ChangeImpactReport, Document, DocumentVersion, Passage
 from src.modules.knowledge.service import KnowledgeService
 from src.modules.policy.models import CriticalField, Policy, PolicyLifecycleEvent, PolicyVersion
 from src.shared.auth import AuthenticatedUser
@@ -217,6 +217,7 @@ def _create_isolated_session() -> tuple[Any, Session]:
         AnswerPackageRecord.__table__,
         AnswerCitationRecord.__table__,
         PolicyLifecycleEvent.__table__,
+        ChangeImpactReport.__table__,
         ImportBatch.__table__,
     ]
     Base.metadata.create_all(engine, tables=tables)
