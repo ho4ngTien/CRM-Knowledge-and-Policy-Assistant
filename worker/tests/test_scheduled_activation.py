@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-import src.tasks.index_task as index_task
+from src.tasks import index_task
 
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 VN_NOW = datetime(2026, 12, 28, 9, 0, tzinfo=VN_TZ)
